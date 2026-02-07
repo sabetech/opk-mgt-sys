@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react"
-import { Check, ChevronsUpDown, Trash2, Plus, Calendar as CalendarIcon } from "lucide-react"
+import { Check, ChevronsUpDown, Trash2, CalendarIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
+import { format } from "date-fns"
 import {
     Command,
     CommandEmpty,
@@ -17,7 +18,7 @@ import {
     PopoverContent,
     PopoverTrigger,
 } from "@/components/ui/popover"
-import { Input } from "@/components/ui/input"
+
 import {
     Table,
     TableBody,
@@ -26,107 +27,121 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
+import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { supabase } from "@/lib/supabase"
+import { toast } from "sonner"
 
-// Mock Customers for selection
-const MOCK_CUSTOMERS = [
-    { value: "1", label: "John Doe (Retailer)" },
-    { value: "2", label: "Jane Smith (Wholesaler)" },
-    { value: "3", label: "Kwame Mensah (Retailer VSE)" },
-    { value: "4", label: "Ama Osei (Retailer)" },
-    { value: "5", label: "Kofi Boateng (Wholesaler)" },
-]
-
-interface Product {
+interface Customer {
     id: number
-    sku_name: string
-}
-
-interface ReturnItem {
-    id: string // temporary id for the list
-    productId: number
-    productName: string
-    quantity: number
+    name: string
+    customer_types: {
+        name: string
+    }
 }
 
 export default function CustomerReturnEmpties() {
     const [date, setDate] = useState<Date>()
+    const [calendarOpen, setCalendarOpen] = useState(false)
     const [openCustomer, setOpenCustomer] = useState(false)
     const [selectedCustomer, setSelectedCustomer] = useState("")
 
-    // Product Fetching
+    // Data State
+    const [customers, setCustomers] = useState<Customer[]>([])
     const [products, setProducts] = useState<Product[]>([])
-    const [productsLoading, setProductsLoading] = useState(true)
+    const [returnItems, setReturnItems] = useState<SelectedItem[]>([])
 
-    // Form State
-    const [openProduct, setOpenProduct] = useState(false)
-    const [selectedProduct, setSelectedProduct] = useState<number | null>(null)
-    const [quantity, setQuantity] = useState<string>("1")
-    const [returnItems, setReturnItems] = useState<ReturnItem[]>([])
+    const [loadingCustomers, setLoadingCustomers] = useState(true)
 
+    // Fetch Data
     useEffect(() => {
-        async function fetchProducts() {
+        async function fetchData() {
             try {
-                const { data, error } = await supabase
+                // Fetch Products
+                const { data: productsData, error: productsError } = await supabase
                     .from('products')
                     .select('id, sku_name')
                     .order('sku_name')
 
-                if (error) throw error
-                if (data) setProducts(data)
+                if (productsError) throw productsError
+                if (productsData) {
+                    const transformedProducts: Product[] = productsData.map(item => ({
+                        id: item.id,
+                        name: item.sku_name
+                    }))
+                    setProducts(transformedProducts)
+                }
+
+                // Fetch Customers
+                const { data: customersData, error: customersError } = await supabase
+                    .from('customers')
+                    .select('id, name, customer_types(name)')
+                    .is('deleted_at', null)
+                    .order('name', { ascending: true })
+
+                if (customersError) throw customersError
+                setCustomers(customersData as any || [])
+                setLoadingCustomers(false)
+
             } catch (error) {
-                console.error("Error fetching products:", error)
-            } finally {
-                setProductsLoading(false)
+                console.error("Error fetching data:", error)
             }
         }
-        fetchProducts()
+        fetchData()
     }, [])
-
-    const handleAddItem = () => {
-        if (!selectedProduct || !quantity || parseInt(quantity) <= 0) return
-
-        const product = products.find(p => p.id === selectedProduct)
-        if (!product) return
-
-        const newItem: ReturnItem = {
-            id: crypto.randomUUID(),
-            productId: product.id,
-            productName: product.sku_name,
-            quantity: parseInt(quantity)
-        }
-
-        setReturnItems([...returnItems, newItem])
-
-        // Reset inputs
-        setSelectedProduct(null)
-        setQuantity("1")
-    }
 
     const handleRemoveItem = (id: string) => {
         setReturnItems(returnItems.filter(item => item.id !== id))
     }
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!selectedCustomer || !date || returnItems.length === 0) {
-            alert("Please fill in all required fields (Customer, Date, and at least one item).")
+            toast.error("Please fill in all required fields (Customer, Date, and at least one item).")
             return
         }
 
-        const submissionData = {
-            customerId: selectedCustomer,
-            returnDate: date.toISOString(),
-            items: returnItems
+        const totalQuantity = returnItems.reduce((sum, item) => sum + item.quantity, 0)
+
+        try {
+            // 1. Insert into empties_log
+            const { data: logData, error: logError } = await supabase
+                .from('empties_log')
+                .insert([{
+                    date: date.toISOString().split('T')[0],
+                    customer_id: parseInt(selectedCustomer),
+                    activity: 'customer_empties_return',
+                    total_quantity: totalQuantity
+                }])
+                .select()
+                .single()
+
+            if (logError) throw logError
+
+            // 2. Insert into empties_log_detail
+            const detailsToInsert = returnItems.map(item => ({
+                log_id: logData.id,
+                product_id: item.productId,
+                quantity: item.quantity
+            }))
+
+            const { error: detailError } = await supabase
+                .from('empties_log_detail')
+                .insert(detailsToInsert)
+
+            if (detailError) throw detailError
+
+            toast.success("Return recorded successfully!")
+
+            // Reset form
+            setSelectedCustomer("")
+            setDate(undefined)
+            setReturnItems([])
+        } catch (error: any) {
+            console.error("Error saving return:", error)
+            toast.error(error.message || "Failed to record return.")
         }
-
-        console.log("Submitting Return Data:", submissionData)
-        alert("Return recorded! Check console for data.")
-
-        // Reset form
-        setSelectedCustomer("")
-        setDate(undefined)
-        setReturnItems([])
     }
+
+    const currentCustomer = customers.find(c => c.id.toString() === selectedCustomer)
 
     return (
         <div className="space-y-6">
@@ -148,10 +163,11 @@ export default function CustomerReturnEmpties() {
                                 role="combobox"
                                 aria-expanded={openCustomer}
                                 className="w-full justify-between"
+                                disabled={loadingCustomers}
                             >
                                 {selectedCustomer
-                                    ? MOCK_CUSTOMERS.find((customer) => customer.value === selectedCustomer)?.label
-                                    : "Select customer..."}
+                                    ? `${currentCustomer?.name} (${currentCustomer?.customer_types?.name})`
+                                    : loadingCustomers ? "Loading customers..." : "Select customer..."}
                                 <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                             </Button>
                         </PopoverTrigger>
@@ -161,22 +177,21 @@ export default function CustomerReturnEmpties() {
                                 <CommandList>
                                     <CommandEmpty>No customer found.</CommandEmpty>
                                     <CommandGroup>
-                                        {MOCK_CUSTOMERS.map((customer) => (
+                                        {customers.map((customer) => (
                                             <CommandItem
-                                                key={customer.value}
-                                                value={customer.label}
+                                                key={customer.id}
                                                 onSelect={() => {
-                                                    setSelectedCustomer(customer.value === selectedCustomer ? "" : customer.value)
+                                                    setSelectedCustomer(customer.id.toString() === selectedCustomer ? "" : customer.id.toString())
                                                     setOpenCustomer(false)
                                                 }}
                                             >
                                                 <Check
                                                     className={cn(
                                                         "mr-2 h-4 w-4",
-                                                        selectedCustomer === customer.value ? "opacity-100" : "opacity-0"
+                                                        selectedCustomer === customer.id.toString() ? "opacity-100" : "opacity-0"
                                                     )}
                                                 />
-                                                {customer.label}
+                                                {customer.name} ({customer.customer_types?.name})
                                             </CommandItem>
                                         ))}
                                     </CommandGroup>
@@ -189,23 +204,27 @@ export default function CustomerReturnEmpties() {
                 {/* 2. Date Selection */}
                 <div className="flex flex-col space-y-2">
                     <label className="text-sm font-medium">Return Date</label>
-                    <Popover>
+                    <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                         <PopoverTrigger asChild>
                             <Button
-                                variant={"outline"}
+                                variant="outline"
                                 className={cn(
                                     "w-full justify-start text-left font-normal",
                                     !date && "text-muted-foreground"
                                 )}
+                                onClick={() => setCalendarOpen(true)}
                             >
                                 <CalendarIcon className="mr-2 h-4 w-4" />
-                                {date ? date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : <span>Pick a date</span>}
+                                {date ? format(date, "PPP") : <span>Pick a date</span>}
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
+                        <PopoverContent className="w-auto p-0" align="start">
                             <DatePicker
                                 value={date}
-                                onChange={(newDate) => setDate(newDate)}
+                                onChange={(newDate) => {
+                                    setDate(newDate)
+                                    setCalendarOpen(false)
+                                }}
                             />
                         </PopoverContent>
                     </Popover>
@@ -213,71 +232,12 @@ export default function CustomerReturnEmpties() {
             </div>
 
             {/* 3. Add Items Section */}
-            <div className="rounded-lg border p-4 bg-muted/20 space-y-4">
-                <h3 className="font-semibold">Add Returned Items</h3>
-                <div className="flex flex-col md:flex-row gap-4 items-end">
-                    <div className="flex-1 space-y-2 w-full">
-                        <label className="text-sm font-medium">Product</label>
-                        <Popover open={openProduct} onOpenChange={setOpenProduct}>
-                            <PopoverTrigger asChild>
-                                <Button
-                                    variant="outline"
-                                    role="combobox"
-                                    aria-expanded={openProduct}
-                                    className="w-full justify-between"
-                                >
-                                    {selectedProduct
-                                        ? products.find((product) => product.id === selectedProduct)?.sku_name
-                                        : "Select product..."}
-                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                </Button>
-                            </PopoverTrigger>
-                            <PopoverContent className="w-[400px] p-0">
-                                <Command>
-                                    <CommandInput placeholder="Search product..." />
-                                    <CommandList>
-                                        <CommandEmpty>No product found.</CommandEmpty>
-                                        <CommandGroup>
-                                            {products.map((product) => (
-                                                <CommandItem
-                                                    key={product.id}
-                                                    value={product.sku_name}
-                                                    onSelect={() => {
-                                                        setSelectedProduct(product.id === selectedProduct ? null : product.id)
-                                                        setOpenProduct(false)
-                                                    }}
-                                                >
-                                                    <Check
-                                                        className={cn(
-                                                            "mr-2 h-4 w-4",
-                                                            selectedProduct === product.id ? "opacity-100" : "opacity-0"
-                                                        )}
-                                                    />
-                                                    {product.sku_name}
-                                                </CommandItem>
-                                            ))}
-                                        </CommandGroup>
-                                    </CommandList>
-                                </Command>
-                            </PopoverContent>
-                        </Popover>
-                    </div>
-
-                    <div className="w-full md:w-32 space-y-2">
-                        <label className="text-sm font-medium">Quantity (Crates)</label>
-                        <Input
-                            type="number"
-                            min="1"
-                            value={quantity}
-                            onChange={(e) => setQuantity(e.target.value)}
-                        />
-                    </div>
-
-                    <Button onClick={handleAddItem} disabled={!selectedProduct}>
-                        <Plus className="mr-2 h-4 w-4" /> Add Item
-                    </Button>
-                </div>
-            </div>
+            <ProductSelector
+                products={products}
+                selectedItems={returnItems}
+                onItemsChange={setReturnItems}
+                quantityLabel="Quantity (Crates)"
+            />
 
             {/* 4. Items List */}
             <div className="rounded-md border bg-white dark:bg-card">

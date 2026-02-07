@@ -29,6 +29,7 @@ import {
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 interface SidebarProps extends React.HTMLAttributes<HTMLDivElement> { }
 
@@ -70,6 +71,7 @@ export function AppSidebar({ className }: SidebarProps) {
             children: [
                 { title: "Products", href: "/dashboard/warehouse/products" },
                 { title: "Pending Orders", href: "/dashboard/warehouse/pending-orders" },
+                { title: "Completed Orders", href: "/dashboard/warehouse/completed-orders" },
                 { title: "Adjust Stock", href: "/dashboard/warehouse/adjust-stock" },
                 { title: "Record Receivable", href: "/dashboard/warehouse/record-receivable" },
                 { title: "Receivables Log", href: "/dashboard/warehouse/receivables-log" },
@@ -105,6 +107,9 @@ export function AppSidebar({ className }: SidebarProps) {
                 <div className="flex items-center gap-2 font-semibold">
                     <Beer className="h-6 w-6 text-amber-600" />
                     <span className="">OPK Distributor</span>
+                </div>
+                <div className="ml-auto">
+                    <ThemeToggle />
                 </div>
             </div>
             <div className="flex-1 overflow-auto py-2">

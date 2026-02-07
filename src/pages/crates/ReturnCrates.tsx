@@ -1,24 +1,14 @@
 import { useState, useEffect } from "react"
-import { Calendar as CalendarIcon, Plus, Trash2, Check, ChevronsUpDown } from "lucide-react"
+import { Trash2, CalendarIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { format } from "date-fns"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-} from "@/components/ui/command"
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover"
 import {
     Table,
     TableBody,
@@ -28,22 +18,12 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { supabase } from "@/lib/supabase"
-
-interface Product {
-    id: number
-    sku_name: string
-}
-
-interface ReturnItem {
-    id: string
-    productId: number
-    productName: string
-    quantity: number
-}
 
 export default function ReturnCrates() {
     const [date, setDate] = useState<Date>()
+    const [calendarOpen, setCalendarOpen] = useState(false)
     const [vehicleNumber, setVehicleNumber] = useState("")
     const [returnedBy, setReturnedBy] = useState("")
     const [numberOfPallets, setNumberOfPallets] = useState("")
@@ -51,11 +31,7 @@ export default function ReturnCrates() {
 
     // Product selection
     const [products, setProducts] = useState<Product[]>([])
-    const [productsLoading, setProductsLoading] = useState(true)
-    const [openProduct, setOpenProduct] = useState(false)
-    const [selectedProduct, setSelectedProduct] = useState<number | null>(null)
-    const [quantity, setQuantity] = useState<string>("1")
-    const [returnItems, setReturnItems] = useState<ReturnItem[]>([])
+    const [returnItems, setReturnItems] = useState<SelectedItem[]>([])
 
     useEffect(() => {
         async function fetchProducts() {
@@ -67,35 +43,20 @@ export default function ReturnCrates() {
                     .order('sku_name')
 
                 if (error) throw error
-                if (data) setProducts(data)
+                if (data) {
+                    // Transform data to match Product interface
+                    const transformedProducts: Product[] = data.map(item => ({
+                        id: item.id,
+                        name: item.sku_name
+                    }))
+                    setProducts(transformedProducts)
+                }
             } catch (error) {
                 console.error("Error fetching products:", error)
-            } finally {
-                setProductsLoading(false)
             }
         }
         fetchProducts()
     }, [])
-
-    const handleAddItem = () => {
-        if (!selectedProduct || !quantity || parseInt(quantity) <= 0) return
-
-        const product = products.find(p => p.id === selectedProduct)
-        if (!product) return
-
-        const newItem: ReturnItem = {
-            id: crypto.randomUUID(),
-            productId: product.id,
-            productName: product.sku_name,
-            quantity: parseInt(quantity)
-        }
-
-        setReturnItems([...returnItems, newItem])
-
-        // Reset inputs
-        setSelectedProduct(null)
-        setQuantity("1")
-    }
 
     const handleRemoveItem = (id: string) => {
         setReturnItems(returnItems.filter(item => item.id !== id))
@@ -130,10 +91,6 @@ export default function ReturnCrates() {
         setReturnItems([])
     }
 
-    // Filter out products that are already in the return items list
-    const selectedProductIds = new Set(returnItems.map(item => item.productId))
-    const availableProducts = products.filter(product => !selectedProductIds.has(product.id))
-
     return (
         <div className="space-y-6">
             <div>
@@ -153,7 +110,7 @@ export default function ReturnCrates() {
                             {/* Date */}
                             <div className="space-y-2">
                                 <Label htmlFor="date">Date <span className="text-red-500">*</span></Label>
-                                <Popover>
+                                <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                                     <PopoverTrigger asChild>
                                         <Button
                                             variant="outline"
@@ -161,15 +118,19 @@ export default function ReturnCrates() {
                                                 "w-full justify-start text-left font-normal",
                                                 !date && "text-muted-foreground"
                                             )}
+                                            onClick={() => setCalendarOpen(true)}
                                         >
                                             <CalendarIcon className="mr-2 h-4 w-4" />
-                                            {date ? date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : <span>Pick a date</span>}
+                                            {date ? format(date, "PPP") : <span>Pick a date</span>}
                                         </Button>
                                     </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
+                                    <PopoverContent className="w-auto p-0" align="start">
                                         <DatePicker
                                             value={date}
-                                            onChange={(newDate) => setDate(newDate)}
+                                            onChange={(newDate) => {
+                                                setDate(newDate)
+                                                setCalendarOpen(false)
+                                            }}
                                         />
                                     </PopoverContent>
                                 </Popover>
@@ -232,71 +193,12 @@ export default function ReturnCrates() {
                         <CardTitle>Products to Return</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="rounded-lg border p-4 bg-muted/20 space-y-4">
-                            <h4 className="font-semibold text-sm">Add Product</h4>
-                            <div className="flex flex-col md:flex-row gap-4 items-end">
-                                <div className="flex-1 space-y-2 w-full">
-                                    <Label>Product</Label>
-                                    <Popover open={openProduct} onOpenChange={setOpenProduct}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                aria-expanded={openProduct}
-                                                className="w-full justify-between"
-                                            >
-                                                {selectedProduct
-                                                    ? products.find((product) => product.id === selectedProduct)?.sku_name
-                                                    : "Select product..."}
-                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[400px] p-0">
-                                            <Command>
-                                                <CommandInput placeholder="Search product..." />
-                                                <CommandList>
-                                                    <CommandEmpty>No product found.</CommandEmpty>
-                                                    <CommandGroup>
-                                                        {availableProducts.map((product) => (
-                                                            <CommandItem
-                                                                key={product.id}
-                                                                value={product.sku_name}
-                                                                onSelect={() => {
-                                                                    setSelectedProduct(product.id === selectedProduct ? null : product.id)
-                                                                    setOpenProduct(false)
-                                                                }}
-                                                            >
-                                                                <Check
-                                                                    className={cn(
-                                                                        "mr-2 h-4 w-4",
-                                                                        selectedProduct === product.id ? "opacity-100" : "opacity-0"
-                                                                    )}
-                                                                />
-                                                                {product.sku_name}
-                                                            </CommandItem>
-                                                        ))}
-                                                    </CommandGroup>
-                                                </CommandList>
-                                            </Command>
-                                        </PopoverContent>
-                                    </Popover>
-                                </div>
-
-                                <div className="w-full md:w-32 space-y-2">
-                                    <Label>Quantity</Label>
-                                    <Input
-                                        type="number"
-                                        min="1"
-                                        value={quantity}
-                                        onChange={(e) => setQuantity(e.target.value)}
-                                    />
-                                </div>
-
-                                <Button type="button" onClick={handleAddItem} disabled={!selectedProduct}>
-                                    <Plus className="mr-2 h-4 w-4" /> Add Item
-                                </Button>
-                            </div>
-                        </div>
+                        <ProductSelector
+                            products={products}
+                            selectedItems={returnItems}
+                            onItemsChange={setReturnItems}
+                            quantityLabel="Quantity"
+                        />
 
                         {/* Items List */}
                         <div className="rounded-md border bg-white dark:bg-card">

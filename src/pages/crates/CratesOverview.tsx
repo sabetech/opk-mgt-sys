@@ -15,6 +15,8 @@ interface Product {
     id: number
     sku_name: string
     code_name: string
+    full_quantity: number
+    empty_quantity: number
 }
 
 interface CrateStats {
@@ -34,42 +36,47 @@ const MOCK_CRATE_STATS: CrateStats = {
     ownedByOPK: 500,
 }
 
-// Mock balance data for products (would come from a crates_inventory table in real implementation)
-const MOCK_PRODUCT_BALANCES: Record<number, number> = {}
-
 export default function CratesOverview() {
     const [products, setProducts] = useState<Product[]>([])
     const [loading, setLoading] = useState(true)
     const [stats] = useState<CrateStats>(MOCK_CRATE_STATS)
 
     useEffect(() => {
-        async function fetchReturnableProducts() {
+        async function fetchCrateData() {
             try {
+                // Fetch products with their stock and empties data
                 const { data, error } = await supabase
                     .from('products')
-                    .select('id, sku_name, code_name')
+                    .select(`
+                        id, 
+                        sku_name, 
+                        code_name,
+                        warehouse_stock (quantity),
+                        empties (quantity_on_ground)
+                    `)
                     .eq('returnable', true)
                     .order('sku_name')
 
                 if (error) throw error
-                if (data) setProducts(data)
+
+                if (data) {
+                    const mappedProducts: Product[] = data.map((item: any) => ({
+                        id: item.id,
+                        sku_name: item.sku_name,
+                        code_name: item.code_name,
+                        full_quantity: item.warehouse_stock?.[0]?.quantity || 0,
+                        empty_quantity: item.empties?.[0]?.quantity_on_ground || 0
+                    }))
+                    setProducts(mappedProducts)
+                }
             } catch (error) {
-                console.error("Error fetching returnable products:", error)
+                console.error("Error fetching crate data:", error)
             } finally {
                 setLoading(false)
             }
         }
-        fetchReturnableProducts()
+        fetchCrateData()
     }, [])
-
-    // Generate mock balances for products
-    const getProductBalance = (productId: number): number => {
-        if (!(productId in MOCK_PRODUCT_BALANCES)) {
-            // Generate random balance between 0 and 500
-            MOCK_PRODUCT_BALANCES[productId] = Math.floor(Math.random() * 500)
-        }
-        return MOCK_PRODUCT_BALANCES[productId]
-    }
 
     const statsCards = [
         {
@@ -146,41 +153,55 @@ export default function CratesOverview() {
                     </p>
                 </div>
 
-                <div className="rounded-md border bg-white dark:bg-card">
+                <div className="rounded-md border bg-white dark:bg-card overflow-hidden">
                     <Table>
                         <TableHeader>
-                            <TableRow>
-                                <TableHead>Product Name</TableHead>
+                            <TableRow className="bg-muted/50">
+                                <TableHead className="w-[30%]">Product Name</TableHead>
                                 <TableHead>Code Name</TableHead>
-                                <TableHead className="text-right">Balance (Crates)</TableHead>
+                                <TableHead className="text-right">Crates with Full bottles</TableHead>
+                                <TableHead className="text-right">Crates with Empty bottles</TableHead>
+                                <TableHead className="text-right font-bold">Total Empties</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={3} className="h-24 text-center">
-                                        Loading products...
+                                    <TableCell colSpan={5} className="h-24 text-center">
+                                        <div className="flex items-center justify-center gap-2">
+                                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                                            Loading crate inventory...
+                                        </div>
                                     </TableCell>
                                 </TableRow>
                             ) : products.length > 0 ? (
-                                products.map((product) => (
-                                    <TableRow key={product.id}>
-                                        <TableCell className="font-medium">
-                                            {product.sku_name}
-                                        </TableCell>
-                                        <TableCell>
-                                            <span className="font-mono text-sm">
-                                                {product.code_name || "—"}
-                                            </span>
-                                        </TableCell>
-                                        <TableCell className="text-right font-semibold">
-                                            {getProductBalance(product.id)}
-                                        </TableCell>
-                                    </TableRow>
-                                ))
+                                products.map((product) => {
+                                    const totalEmpties = product.full_quantity + product.empty_quantity
+                                    return (
+                                        <TableRow key={product.id} className="hover:bg-muted/50 transition-colors">
+                                            <TableCell className="font-medium">
+                                                {product.sku_name}
+                                            </TableCell>
+                                            <TableCell>
+                                                <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+                                                    {product.code_name || "—"}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                {product.full_quantity.toLocaleString()}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                {product.empty_quantity.toLocaleString()}
+                                            </TableCell>
+                                            <TableCell className="text-right font-bold text-primary">
+                                                {totalEmpties.toLocaleString()}
+                                            </TableCell>
+                                        </TableRow>
+                                    )
+                                })
                             ) : (
                                 <TableRow>
-                                    <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                                         No returnable products found.
                                     </TableCell>
                                 </TableRow>
