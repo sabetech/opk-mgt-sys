@@ -54,7 +54,8 @@ interface Customer {
     id: number
     name: string
     phone: string | null
-    balance?: number
+    balance: number
+    has_mou: boolean
     customer_types: {
         name: string
     }
@@ -106,7 +107,7 @@ export default function Sale() {
                 // Fetch Customers
                 const { data: customersData, error: customersError } = await supabase
                     .from('customers')
-                    .select('id, name, phone, balance, customer_types(name)')
+                    .select('id, name, phone, balance, has_mou, customer_types(name)')
                     .is('deleted_at', null)
                     .order('name', { ascending: true })
 
@@ -170,6 +171,20 @@ export default function Sale() {
     const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0)
     const grandTotal = cart.reduce((sum, item) => sum + item.total, 0)
 
+    // Calculate required empties for the cart
+    const itemsInCart = cart.map(item => ({
+        ...item,
+        isReturnable: products.find(p => p.id === item.productId)?.returnable || false
+    }))
+
+    const requiredEmpties = itemsInCart
+        .filter(item => item.isReturnable)
+        .reduce((sum, item) => sum + item.quantity, 0)
+
+    const currentBalance = selectedCustomer?.balance || 0
+    const projectedBalance = currentBalance - requiredEmpties
+    const isBalanceInsufficient = !selectedCustomer?.has_mou && projectedBalance < 0
+
     const [processing, setProcessing] = useState(false)
 
     const handleCheckout = async () => {
@@ -225,9 +240,49 @@ export default function Sale() {
                 if (detailError) throw detailError
             }
 
-            // Here you would normally proceed to record the actual sale in a 'sales' table.
+            // 3. Record the actual sale in 'orders' and 'sales' tables
+            // First, get the order_type_id for 'sale'
+            const { data: orderTypeData, error: orderTypeError } = await supabase
+                .from('order_types')
+                .select('id')
+                .eq('name', 'sale')
+                .single()
 
-            toast.success(`Sale processed successfully for ${selectedCustomer.name}!`)
+            if (orderTypeError) throw orderTypeError
+
+            // Insert into orders header
+            const { data: orderData, error: orderError } = await supabase
+                .from('orders')
+                .insert([{
+                    customer_id: selectedCustomer.id,
+                    total_amount: grandTotal,
+                    payment_type: paymentType,
+                    order_type_id: orderTypeData.id,
+                    status: 'pending',
+                    date_time: new Date().toISOString()
+                }])
+                .select()
+                .single()
+
+            if (orderError) throw orderError
+
+            // Insert into sales (order items)
+            const salesToInsert = cart.map(item => ({
+                order_id: orderData.id,
+                product_id: item.productId,
+                quantity: item.quantity,
+                unit_price: item.price,
+                sub_total: item.total,
+                discount: 0
+            }))
+
+            const { error: salesError } = await supabase
+                .from('sales')
+                .insert(salesToInsert)
+
+            if (salesError) throw salesError
+
+            toast.success(`Order #${orderData.id} created successfully for ${selectedCustomer.name} and is pending approval.`)
             setCart([])
             setSelectedCustomer(null)
         } catch (error: any) {
@@ -478,6 +533,29 @@ export default function Sale() {
                                     <span className="text-sm font-medium">Total Quantity</span>
                                     <span className="text-lg font-bold">{totalQuantity}</span>
                                 </div>
+
+                                {/* Empties Breakdown */}
+                                {selectedCustomer && requiredEmpties > 0 && (
+                                    <div className="space-y-2 pt-2">
+                                        <div className="flex justify-between items-center text-sm">
+                                            <span className="text-muted-foreground">Empties Balance</span>
+                                            <span className="font-bold">{currentBalance}</span>
+                                        </div>
+                                        <div className="flex justify-between items-center text-sm text-amber-700">
+                                            <span className="font-medium">Required for Cart</span>
+                                            <span className="font-bold">-{requiredEmpties}</span>
+                                        </div>
+                                        <div className={`flex justify-between items-center p-2 rounded-md ${isBalanceInsufficient ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+                                            <span className="text-xs font-bold uppercase">Projected Balance</span>
+                                            <span className="text-lg font-black">{projectedBalance}</span>
+                                        </div>
+                                        {isBalanceInsufficient && (
+                                            <p className="text-[10px] text-red-600 font-bold text-center leading-tight">
+                                                Insufficient empties. Customer requires an MOU to go negative.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
 
                             {/* Total Price Section */}
@@ -510,7 +588,7 @@ export default function Sale() {
                             <Button
                                 onClick={handleCheckout}
                                 className="w-full h-14 bg-amber-800 hover:bg-amber-900 text-lg font-bold shadow-md uppercase tracking-widest gap-2"
-                                disabled={cart.length === 0 || processing}
+                                disabled={cart.length === 0 || processing || isBalanceInsufficient}
                             >
                                 {processing ? (
                                     <>

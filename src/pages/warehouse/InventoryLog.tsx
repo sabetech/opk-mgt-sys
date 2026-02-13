@@ -1,6 +1,19 @@
-import { useState } from "react"
+import { supabase } from "@/lib/supabase"
+import { useEffect, useState } from "react"
+import { toast } from "sonner"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, ChevronDown, ChevronRight, Package, ArrowUpRight, ArrowDownLeft, XCircle, Gift, RefreshCcw } from "lucide-react"
+import {
+    Calendar as CalendarIcon,
+    ChevronDown,
+    ChevronRight,
+    Package,
+    ArrowUpRight,
+    ArrowDownLeft,
+    XCircle,
+    Gift,
+    RefreshCcw,
+    Loader2
+} from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -21,7 +34,7 @@ type Transaction = {
     id: string
     time: string
     description: string
-    type: 'opening' | 'received' | 'sent_vse' | 'sold' | 'returned_vse' | 'breakage' | 'promo' | 'reimbursement'
+    type: 'supplier_receipt' | 'vse_loadout' | 'retail_sale' | 'wholesale_sale' | 'breakage' | 'promo_out' | 'promo_reimbursement' | 'opening_stock'
     quantity: number
     balance: number
 }
@@ -41,58 +54,102 @@ type ProductInventory = {
     transactions: Transaction[]
 }
 
-// Mock Data Generation
-const MOCK_INVENTORY: ProductInventory[] = [
-    {
-        id: "p1",
-        name: "ABC Golden Lag 300ml RET 24*1",
-        openingStock: 200,
-        totalReceived: 50,
-        vsesSent: 100,
-        totalSold: 13, // 5 + 8
-        vsesReturned: 0,
-        breakages: 2,
-        promoStock: 10,
-        reimbursement: 10,
-        closingStock: 135, // 200 + 50 - 100 - 13 - 2 - 10 + 10 = 135
-        transactions: [
-            { id: "t1", time: "08:00 AM", description: "Opening Stock", type: "opening", quantity: 200, balance: 200 },
-            { id: "t2", time: "09:00 AM", description: "Received from Supplier", type: "received", quantity: 50, balance: 250 },
-            { id: "t3", time: "10:00 AM", description: "Dispatched via VSEs", type: "sent_vse", quantity: -100, balance: 150 },
-            { id: "t4", time: "10:14 AM", description: "Sold directly to Retailer", type: "sold", quantity: -5, balance: 145 },
-            { id: "t5", time: "10:15 AM", description: "Breakages Reported", type: "breakage", quantity: -2, balance: 143 },
-            { id: "t6", time: "10:30 AM", description: "Sold directly to Retailer", type: "sold", quantity: -8, balance: 135 },
-            { id: "t7", time: "10:35 AM", description: "Set aside as Promo Stock", type: "promo", quantity: -10, balance: 125 },
-            { id: "t8", time: "11:00 AM", description: "Reimbursement from Guinness Ghana", type: "reimbursement", quantity: 10, balance: 135 },
-        ]
-    },
-    {
-        id: "p2",
-        name: "Guinness Foreign Extra Stout 330ml",
-        openingStock: 500,
-        totalReceived: 200,
-        vsesSent: 300,
-        totalSold: 50,
-        vsesReturned: 20,
-        breakages: 5,
-        promoStock: 0,
-        reimbursement: 0,
-        closingStock: 365,
-        transactions: [
-            { id: "t1", time: "08:00 AM", description: "Opening Stock", type: "opening", quantity: 500, balance: 500 },
-            { id: "t2", time: "09:30 AM", description: "Received from Supplier", type: "received", quantity: 200, balance: 700 },
-            { id: "t3", time: "10:00 AM", description: "Dispatched via VSEs", type: "sent_vse", quantity: -300, balance: 400 },
-            { id: "t4", time: "12:00 PM", description: "Returns from VSE", type: "returned_vse", quantity: 20, balance: 420 },
-            { id: "t5", time: "02:00 PM", description: "Bulk Sale", type: "sold", quantity: -50, balance: 370 },
-            { id: "t6", time: "04:00 PM", description: "Breakages in Warehouse", type: "breakage", quantity: -5, balance: 365 },
-        ]
-    }
-]
-
 export default function InventoryLog() {
-    const [date, setDate] = useState<Date>()
+    const [date, setDate] = useState<Date>(new Date()) // Default to today
     const [calendarOpen, setCalendarOpen] = useState(false)
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+    const [loading, setLoading] = useState(true)
+    const [inventoryData, setInventoryData] = useState<ProductInventory[]>([])
+
+    useEffect(() => {
+        fetchData()
+    }, [date])
+
+    const fetchData = async () => {
+        setLoading(true)
+        try {
+            const dateStr = date.toISOString().split('T')[0]
+
+            // 1. Fetch all products
+            const { data: products, error: prodError } = await supabase
+                .from('products')
+                .select('id, sku_name')
+                .is('deleted_at', null)
+                .order('sku_name', { ascending: true })
+
+            if (prodError) throw prodError
+
+            // 2. Fetch logs for the selected date
+            const { data: logs, error: logsError } = await supabase
+                .from('inventory_logs')
+                .select('*')
+                .eq('date', dateStr)
+                .order('created_at', { ascending: true })
+
+            if (logsError) throw logsError
+
+            // 3. Process data
+            const processedData: ProductInventory[] = (products || []).map(product => {
+                const productLogs = (logs || []).filter((l: any) => l.product_id === product.id)
+
+                let openingStock = 0
+                let totalReceived = 0
+                let vsesSent = 0
+                let totalSold = 0
+                let vsesReturned = 0
+                let breakages = 0
+                let promoStock = 0
+                let reimbursement = 0
+
+                const transactions: Transaction[] = []
+                let runningBalance = 0
+
+                productLogs.forEach((log: any) => {
+                    const qty = log.quantity
+                    runningBalance += qty
+
+                    if (log.type === 'opening_stock') openingStock += qty
+                    else if (log.type === 'supplier_receipt') totalReceived += qty
+                    else if (log.type === 'vse_loadout') vsesSent += Math.abs(qty)
+                    else if (log.type === 'retail_sale' || log.type === 'wholesale_sale') totalSold += Math.abs(qty)
+                    else if (log.type === 'breakage') breakages += Math.abs(qty)
+                    else if (log.type === 'promo_out') promoStock += Math.abs(qty)
+                    else if (log.type === 'promo_reimbursement') reimbursement += qty
+
+                    transactions.push({
+                        id: log.id.toString(),
+                        time: format(new Date(log.created_at), "hh:mm a"),
+                        description: log.description || log.type.replace(/_/g, ' '),
+                        type: log.type as Transaction['type'],
+                        quantity: qty,
+                        balance: runningBalance
+                    })
+                })
+
+                return {
+                    id: product.id.toString(),
+                    name: product.sku_name,
+                    openingStock,
+                    totalReceived,
+                    vsesSent,
+                    totalSold,
+                    vsesReturned,
+                    breakages,
+                    promoStock,
+                    reimbursement,
+                    closingStock: runningBalance,
+                    transactions
+                }
+            })
+
+            setInventoryData(processedData)
+        } catch (error) {
+            console.error('Error fetching inventory logs:', error)
+            toast.error('Failed to load inventory log')
+        } finally {
+            setLoading(false)
+        }
+    }
 
     const toggleRow = (id: string) => {
         const newExpanded = new Set(expandedRows)
@@ -104,7 +161,7 @@ export default function InventoryLog() {
         setExpandedRows(newExpanded)
     }
 
-    const filteredData = date ? MOCK_INVENTORY : MOCK_INVENTORY // Mock logic: ideally filter by date
+    const filteredData = inventoryData.filter(product => product.transactions.length > 0)
 
     // Calculate Totals
     const totalOpeningStock = filteredData.reduce((acc, item) => acc + item.openingStock, 0)
@@ -112,18 +169,26 @@ export default function InventoryLog() {
 
     const getTransactionIcon = (type: Transaction['type']) => {
         switch (type) {
-            case 'received': return <ArrowDownLeft className="h-4 w-4 text-green-500" />
-            case 'reimbursement': return <RefreshCcw className="h-4 w-4 text-blue-500" />
-            case 'returned_vse': return <ArrowDownLeft className="h-4 w-4 text-orange-500" />
-            case 'opening': return <Package className="h-4 w-4 text-gray-500" />
+            case 'supplier_receipt': return <ArrowDownLeft className="h-4 w-4 text-green-500" />
+            case 'promo_reimbursement': return <RefreshCcw className="h-4 w-4 text-blue-500" />
+            case 'opening_stock': return <Package className="h-4 w-4 text-gray-500" />
             case 'breakage': return <XCircle className="h-4 w-4 text-red-500" />
-            case 'promo': return <Gift className="h-4 w-4 text-purple-500" />
+            case 'promo_out': return <Gift className="h-4 w-4 text-purple-500" />
             default: return <ArrowUpRight className="h-4 w-4 text-gray-400" />
         }
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 relative">
+            {loading && (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/50 dark:bg-slate-950/50 backdrop-blur-sm rounded-lg min-h-[400px]">
+                    <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                        <p className="text-sm font-medium">Loading activity logs...</p>
+                    </div>
+                </div>
+            )}
+
             <div className="flex flex-col gap-4">
                 <h2 className="text-3xl font-bold tracking-tight">Inventory Transactions Log</h2>
                 <p className="text-muted-foreground">
@@ -155,15 +220,15 @@ export default function InventoryLog() {
                                     <DatePicker
                                         value={date}
                                         onChange={(newDate) => {
-                                            setDate(newDate)
+                                            setDate(newDate || new Date())
                                             setCalendarOpen(false)
                                         }}
                                     />
                                 </PopoverContent>
                             </Popover>
                             {date && (
-                                <Button variant="ghost" onClick={() => setDate(undefined)}>
-                                    Clear
+                                <Button variant="ghost" onClick={() => setDate(new Date())}>
+                                    Today
                                 </Button>
                             )}
                         </div>
@@ -214,10 +279,15 @@ export default function InventoryLog() {
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filteredData.map((product) => (
-                            <>
+                        {filteredData.length === 0 && !loading ? (
+                            <TableRow>
+                                <TableCell colSpan={11} className="h-24 text-center">
+                                    No products found or no activity for this date.
+                                </TableCell>
+                            </TableRow>
+                        ) : filteredData.map((product) => (
+                            <div key={product.id} className="contents">
                                 <TableRow
-                                    key={product.id}
                                     className={cn("cursor-pointer hover:bg-muted/50 transition-colors border-b", expandedRows.has(product.id) && "bg-muted/30")}
                                     onClick={() => toggleRow(product.id)}
                                 >
@@ -256,13 +326,19 @@ export default function InventoryLog() {
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
-                                                            {product.transactions.map((tx) => (
+                                                            {product.transactions.length === 0 ? (
+                                                                <TableRow>
+                                                                    <TableCell colSpan={5} className="h-12 text-center text-muted-foreground">
+                                                                        No transactions recorded today.
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            ) : product.transactions.map((tx) => (
                                                                 <TableRow key={tx.id}>
                                                                     <TableCell className="font-mono text-xs text-muted-foreground">{tx.time}</TableCell>
                                                                     <TableCell>
                                                                         {getTransactionIcon(tx.type)}
                                                                     </TableCell>
-                                                                    <TableCell>{tx.description}</TableCell>
+                                                                    <TableCell className="capitalize">{tx.description}</TableCell>
                                                                     <TableCell className={cn(
                                                                         "text-right font-medium",
                                                                         tx.quantity > 0 ? "text-green-600" : "text-red-600"
@@ -279,7 +355,7 @@ export default function InventoryLog() {
                                         </TableCell>
                                     </TableRow>
                                 )}
-                            </>
+                            </div>
                         ))}
                     </TableBody>
                 </Table>

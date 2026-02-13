@@ -10,8 +10,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Edit, Trash2, Search, Plus } from "lucide-react"
+import { Trash2, Search, Plus } from "lucide-react"
 import { supabase } from "@/lib/supabase"
+import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { getMockQuantity, formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
 import ProductDialog from "./ProductDialog"
@@ -19,6 +20,7 @@ import ProductDialog from "./ProductDialog"
 const ITEMS_PER_PAGE = 20
 
 export default function Products() {
+    const { profile } = useAuth()
     const [products, setProducts] = useState<Product[]>([])
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
@@ -39,15 +41,15 @@ export default function Products() {
                 .select('*')
                 .is('deleted_at', null) // Only get non-deleted products
                 .order('sku_name', { ascending: true })
-            
+
             if (error) throw error
-            
+
             // Add mock quantities
             const productsWithQuantity = data.map(product => ({
                 ...product,
                 quantity: getMockQuantity(product.id)
             }))
-            
+
             setProducts(productsWithQuantity)
         } catch (error) {
             console.error('Error fetching products:', error)
@@ -60,10 +62,10 @@ export default function Products() {
     // Filter products
     const filteredProducts = products.filter(product => {
         const matchesSearch = product.sku_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                             (product.code_name && product.code_name.toLowerCase().includes(searchTerm.toLowerCase()))
-        const matchesFilter = filterReturnable === "all" || 
-                             (filterReturnable === "returnable" && product.returnable) ||
-                             (filterReturnable === "non-returnable" && !product.returnable)
+            (product.code_name && product.code_name.toLowerCase().includes(searchTerm.toLowerCase()))
+        const matchesFilter = filterReturnable === "all" ||
+            (filterReturnable === "returnable" && product.returnable) ||
+            (filterReturnable === "non-returnable" && !product.returnable)
         return matchesSearch && matchesFilter
     })
 
@@ -99,16 +101,16 @@ export default function Products() {
                         returnable: formData.returnable
                     })
                     .eq('id', editingProduct.id)
-                
+
                 if (error) throw error
-                
+
                 // Update local state
-                setProducts(prev => prev.map(p => 
-                    p.id === editingProduct.id 
+                setProducts(prev => prev.map(p =>
+                    p.id === editingProduct.id
                         ? { ...p, ...formData, wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null, retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null }
                         : p
                 ))
-                
+
                 alert('✅ Product updated successfully!')
             } else {
                 // Add new product
@@ -124,16 +126,16 @@ export default function Products() {
                     }])
                     .select()
                     .single()
-                
+
                 if (error) throw error
-                
+
                 // Add to local state with mock quantity
                 const newProduct = { ...data, quantity: getMockQuantity(data.id) }
                 setProducts(prev => [...prev, newProduct])
-                
+
                 alert('✅ Product added successfully!')
             }
-            
+
             setIsDialogOpen(false)
         } catch (error) {
             console.error('Error saving product:', error)
@@ -145,18 +147,18 @@ export default function Products() {
         if (!confirm(`Are you sure you want to delete "${product.sku_name}"?`)) {
             return
         }
-        
+
         try {
             const { error } = await supabase
                 .from('products')
                 .update({ deleted_at: new Date().toISOString() }) // Soft delete
                 .eq('id', product.id)
-            
+
             if (error) throw error
-            
+
             // Remove from local state
             setProducts(prev => prev.filter(p => p.id !== product.id))
-            
+
             alert('✅ Product deleted successfully!')
         } catch (error) {
             console.error('Error deleting product:', error)
@@ -187,10 +189,12 @@ export default function Products() {
             {/* Header */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-3xl font-bold tracking-tight">Products</h2>
-                <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
-                    <Plus className="h-4 w-4" />
-                    Add Product
-                </Button>
+                {profile?.role !== 'auditor' && (
+                    <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                        <Plus className="h-4 w-4" />
+                        Add Product
+                    </Button>
+                )}
             </div>
 
             {/* Search and Filters */}
@@ -244,7 +248,7 @@ export default function Products() {
                             <TableHead>Retail Price</TableHead>
                             <TableHead>Quantity</TableHead>
                             <TableHead>Returnable</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                            {profile?.role !== 'auditor' && <TableHead className="text-right">Actions</TableHead>}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -270,28 +274,30 @@ export default function Products() {
                                                 {product.returnable ? "Yes" : "No"}
                                             </Badge>
                                         </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex justify-end gap-2">
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="icon" 
-                                                    className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                    onClick={() => handleEditProduct(product)}
-                                                >
-                                                    <Edit className="h-4 w-4" />
-                                                    <span className="sr-only">Edit</span>
-                                                </Button>
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="icon" 
-                                                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                                    onClick={() => handleDeleteProduct(product)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                    <span className="sr-only">Delete</span>
-                                                </Button>
-                                            </div>
-                                        </TableCell>
+                                        {profile?.role !== 'auditor' && (
+                                            <TableCell className="text-right">
+                                                <div className="flex justify-end gap-2">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                                        onClick={() => handleEditProduct(product)}
+                                                    >
+                                                        <Edit className="h-4 w-4" />
+                                                        <span className="sr-only">Edit</span>
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                        onClick={() => handleDeleteProduct(product)}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                        <span className="sr-only">Delete</span>
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        )}
                                     </TableRow>
                                 )
                             })
@@ -313,18 +319,18 @@ export default function Products() {
                         Showing {startIndex + 1} to {endIndex} of {totalItems} products
                     </p>
                     <div className="flex items-center gap-2">
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
+                        <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                             disabled={currentPage === 1}
                         >
                             Previous
                         </Button>
                         <span className="text-sm">Page {currentPage} of {totalPages}</span>
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
+                        <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                             disabled={currentPage === totalPages}
                         >
@@ -335,7 +341,7 @@ export default function Products() {
             )}
 
             {/* Add/Edit Dialog */}
-            <ProductDialog 
+            <ProductDialog
                 open={isDialogOpen}
                 onOpenChange={setIsDialogOpen}
                 editingProduct={editingProduct}

@@ -20,6 +20,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { supabase } from "@/lib/supabase"
+import { toast } from "sonner"
 
 export default function ReturnCrates() {
     const [date, setDate] = useState<Date>()
@@ -62,33 +63,60 @@ export default function ReturnCrates() {
         setReturnItems(returnItems.filter(item => item.id !== id))
     }
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
         if (!date || !vehicleNumber || !returnedBy || returnItems.length === 0) {
-            alert("Please fill in all required fields (Date, Vehicle Number, Returned By, and at least one product).")
+            toast.error("Please fill in all required fields (Date, Vehicle Number, Returned By, and at least one product).")
             return
         }
 
-        const submissionData = {
-            date: date.toISOString(),
-            vehicleNumber,
-            returnedBy,
-            numberOfPallets: numberOfPallets ? parseInt(numberOfPallets) : 0,
-            numberOfPCs: numberOfPCs ? parseInt(numberOfPCs) : 0,
-            items: returnItems
+        const totalQuantity = returnItems.reduce((sum, item) => sum + item.quantity, 0)
+
+        try {
+            // 1. Insert into empties_log
+            const { data: logData, error: logError } = await supabase
+                .from('empties_log')
+                .insert([{
+                    date: date.toISOString().split('T')[0],
+                    total_quantity: totalQuantity,
+                    activity: 'empties_to_supplier',
+                    vehicle_no: vehicleNumber,
+                    returned_by: returnedBy,
+                    num_of_pallets: numberOfPallets ? parseInt(numberOfPallets) : 0,
+                    num_of_pcs: numberOfPCs ? parseInt(numberOfPCs) : 0
+                }])
+                .select()
+                .single()
+
+            if (logError) throw logError
+
+            // 2. Insert into empties_log_detail
+            const detailsToInsert = returnItems.map(item => ({
+                log_id: logData.id,
+                product_id: item.productId,
+                quantity: item.quantity
+            }))
+
+            const { error: detailError } = await supabase
+                .from('empties_log_detail')
+                .insert(detailsToInsert)
+
+            if (detailError) throw detailError
+
+            toast.success("Crate return to supplier recorded successfully!")
+
+            // Reset form
+            setDate(undefined)
+            setVehicleNumber("")
+            setReturnedBy("")
+            setNumberOfPallets("")
+            setNumberOfPCs("")
+            setReturnItems([])
+        } catch (error: any) {
+            console.error("Error saving return:", error)
+            toast.error(error.message || "Failed to record return.")
         }
-
-        console.log("Submitting Return to Guinness Ghana:", submissionData)
-        alert("Return recorded! Check console for data.")
-
-        // Reset form
-        setDate(undefined)
-        setVehicleNumber("")
-        setReturnedBy("")
-        setNumberOfPallets("")
-        setNumberOfPCs("")
-        setReturnItems([])
     }
 
     return (

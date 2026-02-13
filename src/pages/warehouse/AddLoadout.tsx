@@ -27,14 +27,8 @@ import {
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { supabase } from "@/lib/supabase"
 
-// Mock Data
-const VSE_LIST = [
-    { id: "vse1", name: "John Doe (VSE 1)" },
-    { id: "vse2", name: "Sarah Smith (VSE 2)" },
-    { id: "vse3", name: "Michael Brown (VSE 3)" },
-    { id: "vse4", name: "Emily White (VSE 4)" },
-    { id: "vse5", name: "David Wilson (VSE 5)" },
-]
+import { toast } from "sonner"
+import { Loader2 } from "lucide-react"
 
 export default function AddLoadout() {
     const [date, setDate] = useState<Date>()
@@ -45,12 +39,48 @@ export default function AddLoadout() {
 
     // DB State
     const [products, setProducts] = useState<Product[]>([])
+    const [vseList, setVseList] = useState<{ id: string, name: string }[]>([])
     const [loading, setLoading] = useState(true)
+    const [saving, setSaving] = useState(false)
 
-    // Fetch products
+    // Fetch products and VSEs
     useEffect(() => {
-        fetchProducts()
+        const loadInitialData = async () => {
+            setLoading(true)
+            await Promise.all([
+                fetchProducts(),
+                fetchVses()
+            ])
+            setLoading(false)
+        }
+        loadInitialData()
     }, [])
+
+    const fetchVses = async () => {
+        try {
+            // First get the type_id for 'Retailer (VSE)'
+            const { data: typeData, error: typeError } = await supabase
+                .from('customer_types')
+                .select('id')
+                .eq('name', 'Retailer (VSE)')
+                .single()
+
+            if (typeError) throw typeError
+
+            const { data, error } = await supabase
+                .from('customers')
+                .select('id, name')
+                .eq('type_id', typeData.id)
+                .is('deleted_at', null)
+                .order('name', { ascending: true })
+
+            if (error) throw error
+            setVseList(data as any || [])
+        } catch (error) {
+            console.error('Error fetching VSEs:', error)
+            toast.error('Failed to load VSE list')
+        }
+    }
 
     const fetchProducts = async () => {
         try {
@@ -62,18 +92,6 @@ export default function AddLoadout() {
 
             if (error) throw error
 
-            // Transform data to match Product interface
-            // Note: We're mapping 'sku_name' to 'name'. 
-            // 'currentStock' is not in the basic product table usually, 
-            // but for now we will assume 0 or ideally we should fetch inventory levels.
-            // Given the previous mock data had currentStock, if the DB doesn't provide it, 
-            // we might need to fetch it or placeholder it.
-            // Looking at RecordReceivable, it just fetches products.
-            // The prompt says "product selection product list come from the db".
-            // It doesn't explicitly say "real time stock", but the UI shows "Current Stock".
-            // I'll check if I can get stock. If not I'll just map the product details.
-            // For now, I'll map what RecordReceivable maps, plus code_name.
-
             const transformedProducts: Product[] = (data || []).map(item => ({
                 id: item.id,
                 name: item.sku_name,
@@ -83,8 +101,7 @@ export default function AddLoadout() {
             setProducts(transformedProducts)
         } catch (error) {
             console.error('Error fetching products:', error)
-        } finally {
-            setLoading(false)
+            toast.error('Failed to load products')
         }
     }
 
@@ -96,13 +113,52 @@ export default function AddLoadout() {
         setSelectedItems(prev => prev.filter(item => item.id !== itemId))
     }
 
-    const handleSubmit = () => {
-        console.log("Submitting Loadout:", {
-            date,
-            selectedVse,
-            items: selectedItems
-        })
-        // Add actual submit logic here
+    const handleSubmit = async () => {
+        if (!date || !selectedVse || selectedItems.length === 0) {
+            toast.error('Please complete all fields')
+            return
+        }
+
+        setSaving(true)
+        try {
+            // 1. Create Loadout Header
+            const { data: loadout, error: loadoutError } = await supabase
+                .from('loadouts')
+                .insert({
+                    date: date.toISOString().split('T')[0],
+                    vse_id: parseInt(selectedVse),
+                    status: 'approved' // Set to approved to trigger stock deduction immediately
+                })
+                .select()
+                .single()
+
+            if (loadoutError) throw loadoutError
+
+            // 2. Create Loadout Items
+            const itemsToInsert = selectedItems.map(item => ({
+                loadout_id: loadout.id,
+                product_id: item.productId,
+                quantity: item.quantity
+            }))
+
+            const { error: itemsError } = await supabase
+                .from('loadout_items')
+                .insert(itemsToInsert)
+
+            if (itemsError) throw itemsError
+
+            toast.success('Loadout submitted and inventory updated')
+
+            // Reset form
+            setSelectedVse("")
+            setSelectedItems([])
+            setDate(undefined)
+        } catch (error) {
+            console.error('Error submitting loadout:', error)
+            toast.error('Failed to submit loadout')
+        } finally {
+            setSaving(false)
+        }
     }
 
     return (
@@ -168,7 +224,7 @@ export default function AddLoadout() {
                                     className="w-full justify-between"
                                 >
                                     {selectedVse
-                                        ? VSE_LIST.find((vse) => vse.id === selectedVse)?.name
+                                        ? vseList.find((vse: any) => vse.id === parseInt(selectedVse))?.name
                                         : "Select VSE..."}
                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                 </Button>
@@ -179,19 +235,19 @@ export default function AddLoadout() {
                                     <CommandList>
                                         <CommandEmpty>No VSE found.</CommandEmpty>
                                         <CommandGroup>
-                                            {VSE_LIST.map((vse) => (
+                                            {vseList.map((vse: any) => (
                                                 <CommandItem
                                                     key={vse.id}
                                                     value={vse.name}
                                                     onSelect={() => {
-                                                        setSelectedVse(vse.id === selectedVse ? "" : vse.id)
+                                                        setSelectedVse(vse.id.toString() === selectedVse ? "" : vse.id.toString())
                                                         setVseOpen(false)
                                                     }}
                                                 >
                                                     <Check
                                                         className={cn(
                                                             "mr-2 h-4 w-4",
-                                                            selectedVse === vse.id ? "opacity-100" : "opacity-0"
+                                                            selectedVse === vse.id.toString() ? "opacity-100" : "opacity-0"
                                                         )}
                                                     />
                                                     {vse.name}
@@ -218,7 +274,7 @@ export default function AddLoadout() {
                         selectedItems={selectedItems}
                         onItemsChange={handleItemsChange}
                         quantityLabel="Quantity to Load"
-                        disabled={loading}
+                        disabled={loading || saving}
                     />
 
                     {/* Items List */}
@@ -234,7 +290,7 @@ export default function AddLoadout() {
                             </TableHeader>
                             <TableBody>
                                 {selectedItems.length > 0 ? (
-                                    selectedItems.map((item) => {
+                                    selectedItems.map((item: SelectedItem) => {
                                         // For now, we don't have stock levels in the product object from DB.
                                         // We'll leave it as N/A or implement a stock fetch if needed later.
                                         return (
@@ -262,6 +318,7 @@ export default function AddLoadout() {
                                                         size="icon"
                                                         className="text-red-500 hover:text-red-700 hover:bg-red-50"
                                                         onClick={() => removeItem(item.id)}
+                                                        disabled={saving}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
@@ -291,9 +348,10 @@ export default function AddLoadout() {
             </Card>
 
             <div className="flex justify-end gap-3">
-                <Button variant="outline">Cancel</Button>
-                <Button onClick={handleSubmit} disabled={!date || !selectedVse || selectedItems.length === 0}>
-                    Submit Loadout
+                <Button variant="outline" disabled={saving}>Cancel</Button>
+                <Button onClick={handleSubmit} disabled={!date || !selectedVse || selectedItems.length === 0 || saving}>
+                    {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {saving ? "Processing..." : "Submit Loadout"}
                 </Button>
             </div>
         </div>

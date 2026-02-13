@@ -144,12 +144,18 @@ EXECUTE FUNCTION handle_updated_at();
 CREATE OR REPLACE FUNCTION update_stock_after_receivable()
 RETURNS TRIGGER AS $$
 BEGIN
+  -- Update stock
   INSERT INTO warehouse_stock (product_id, quantity)
   VALUES (NEW.product_id, NEW.qty)
   ON CONFLICT (product_id)
   DO UPDATE SET 
     quantity = warehouse_stock.quantity + EXCLUDED.quantity,
     updated_at = NOW();
+
+  -- Log movement
+  INSERT INTO inventory_logs (product_id, type, quantity, reference_id, reference_table, description)
+  VALUES (NEW.product_id, 'supplier_receipt', NEW.qty, NEW.id, 'inventory_receivable_items', 'Received from Supplier');
+
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

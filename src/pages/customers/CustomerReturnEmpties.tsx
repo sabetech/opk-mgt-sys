@@ -60,6 +60,7 @@ export default function CustomerReturnEmpties() {
                 const { data: productsData, error: productsError } = await supabase
                     .from('products')
                     .select('id, sku_name')
+                    .eq('returnable', true)
                     .order('sku_name')
 
                 if (productsError) throw productsError

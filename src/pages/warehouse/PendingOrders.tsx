@@ -19,57 +19,71 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
+import { supabase } from "@/lib/supabase"
+import { format } from "date-fns"
+import { toast } from "sonner"
+import { useAuth } from "@/context/AuthContext"
+
 // Types
 interface Order {
-    id: string
-    orderID: string
-    date: string
-    customer: string
-    status: "pending" | "approved" | "cancelled"
+    id: number
+    order_id: number
+    status: "pending" | "ready" | "cancelled"
+    orders: {
+        total_amount: number
+        date_time: string
+        customers: {
+            name: string
+        } | null
+    } | null
 }
-
-// Mock data
-const mockOrders: Order[] = [
-    { id: "1", orderID: "ORD-2024-001", date: "2024-01-15", customer: "John's Store", status: "pending" },
-    { id: "2", orderID: "ORD-2024-002", date: "2024-01-15", customer: "Mary's Shop", status: "pending" },
-    { id: "3", orderID: "ORD-2024-003", date: "2024-01-14", customer: "Bob's Market", status: "approved" },
-    { id: "4", orderID: "ORD-2024-004", date: "2024-01-14", customer: "Alice Retail", status: "pending" },
-    { id: "5", orderID: "ORD-2024-005", date: "2024-01-13", customer: "Charlie's Store", status: "cancelled" },
-    { id: "6", orderID: "ORD-2024-006", date: "2024-01-13", customer: "Diana Shop", status: "pending" },
-    { id: "7", orderID: "ORD-2024-007", date: "2024-01-12", customer: "Evan Market", status: "approved" },
-    { id: "8", orderID: "ORD-2024-008", date: "2024-01-12", customer: "Fiona Retail", status: "pending" },
-    { id: "9", orderID: "ORD-2024-009", date: "2024-01-11", customer: "George Store", status: "pending" },
-    { id: "10", orderID: "ORD-2024-010", date: "2024-01-11", customer: "Hannah Shop", status: "cancelled" },
-    { id: "11", orderID: "ORD-2024-011", date: "2024-01-10", customer: "Ian Market", status: "pending" },
-    { id: "12", orderID: "ORD-2024-012", date: "2024-01-10", customer: "Julia Retail", status: "approved" },
-]
 
 const ITEMS_PER_PAGE = 20
 
 export default function PendingOrders() {
+    const { profile } = useAuth()
     const [orders, setOrders] = useState<Order[]>([])
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
     const [currentPage, setCurrentPage] = useState(1)
 
-    // Fetch orders (using mock data for now)
-    useEffect(() => {
-        const fetchOrders = async () => {
-            setLoading(true)
-            // Simulate API call
-            setTimeout(() => {
-                setOrders(mockOrders)
-                setLoading(false)
-            }, 500)
+    // Fetch warehouse orders from Supabase
+    const fetchOrders = async () => {
+        setLoading(true)
+        try {
+            const { data, error } = await supabase
+                .from('warehouse_orders')
+                .select(`
+                    id, 
+                    order_id,
+                    status, 
+                    orders(
+                        total_amount,
+                        date_time,
+                        customers(name)
+                    )
+                `)
+                .eq('status', 'pending')
+                .order('created_at', { ascending: false })
+
+            if (error) throw error
+            setOrders(data as any || [])
+        } catch (err) {
+            console.error("Error fetching pending warehouse orders:", err)
+            toast.error("Failed to load pending warehouse orders")
+        } finally {
+            setLoading(false)
         }
+    }
+
+    useEffect(() => {
         fetchOrders()
     }, [])
 
     // Filter orders
     const filteredOrders = orders.filter(order =>
-        order.orderID.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.status.toLowerCase().includes(searchTerm.toLowerCase())
+        (order.orders?.customers?.name || "Walk-in").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        order.order_id.toString().includes(searchTerm)
     )
 
     // Pagination
@@ -79,21 +93,53 @@ export default function PendingOrders() {
     const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, totalItems)
     const paginatedOrders = filteredOrders.slice(startIndex, endIndex)
 
-    // Handle approve order
-    const handleApproveOrder = (orderId: string) => {
-        setOrders(prev => prev.map(order =>
-            order.id === orderId ? { ...order, status: "approved" as const } : order
-        ))
-        alert("✅ Order approved successfully!")
+    // Handle approve order (mark as ready for fulfilment)
+    const handleApproveOrder = async (orderId: number) => {
+        try {
+            const { error } = await supabase
+                .from('warehouse_orders')
+                .update({ status: 'ready' })
+                .eq('id', orderId)
+
+            if (error) throw error
+            toast.success("Order marked as ready for fulfilment!")
+            fetchOrders()
+        } catch (err) {
+            console.error("Error approving warehouse order:", err)
+            toast.error("Failed to approve order")
+        }
     }
 
-    // Handle cancel order
-    const handleCancelOrder = (orderId: string) => {
-        if (confirm("Are you sure you want to cancel this order?")) {
-            setOrders(prev => prev.map(order =>
-                order.id === orderId ? { ...order, status: "cancelled" as const } : order
-            ))
-            alert("✅ Order cancelled successfully!")
+    // Handle cancel order (revert sale)
+    const handleCancelOrder = async (warehouseOrderId: number, posOrderId: number) => {
+        const confirmed = confirm(
+            "ARE YOU SURE? Cancelling this warehouse order will REVERT the entire POS sale. The customer must be refunded."
+        )
+
+        if (confirmed) {
+            try {
+                // 1. Cancel Warehouse Order
+                const { error: whError } = await supabase
+                    .from('warehouse_orders')
+                    .update({ status: 'cancelled' })
+                    .eq('id', warehouseOrderId)
+
+                if (whError) throw whError
+
+                // 2. Cancel POS Order (Revert Sale)
+                const { error: posError } = await supabase
+                    .from('orders')
+                    .update({ status: 'cancelled' })
+                    .eq('id', posOrderId)
+
+                if (posError) throw posError
+
+                toast.success("Sale reverted and warehouse order cancelled.")
+                fetchOrders()
+            } catch (err) {
+                console.error("Error reverting sale:", err)
+                toast.error("Failed to revert sale")
+            }
         }
     }
 
@@ -107,7 +153,7 @@ export default function PendingOrders() {
         switch (status) {
             case "pending":
                 return "outline"
-            case "approved":
+            case "ready":
                 return "default"
             case "cancelled":
                 return "destructive"
@@ -118,7 +164,7 @@ export default function PendingOrders() {
 
     // Format date
     const formatDate = (dateString: string) => {
-        return new Date(dateString).toLocaleDateString()
+        return format(new Date(dateString), 'MMM dd, yyyy HH:mm')
     }
 
     if (loading) {
@@ -163,63 +209,67 @@ export default function PendingOrders() {
                             <TableHead>Order ID</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Customer</TableHead>
+                            <TableHead>Total Amount</TableHead>
                             <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                            {profile?.role !== 'auditor' && <TableHead className="text-right">Actions</TableHead>}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {paginatedOrders.length > 0 ? (
                             paginatedOrders.map((order) => (
                                 <TableRow key={order.id}>
-                                    <TableCell className="font-medium">{order.orderID}</TableCell>
-                                    <TableCell>{formatDate(order.date)}</TableCell>
-                                    <TableCell>{order.customer}</TableCell>
+                                    <TableCell className="font-mono text-xs">#{order.order_id}</TableCell>
+                                    <TableCell>{formatDate(order.orders?.date_time || new Date().toISOString())}</TableCell>
+                                    <TableCell className="font-medium">{order.orders?.customers?.name || "Walk-in"}</TableCell>
+                                    <TableCell className="font-bold">GH₵ {order.orders?.total_amount.toFixed(2)}</TableCell>
                                     <TableCell>
                                         <Badge variant={getStatusBadgeVariant(order.status)}>
                                             {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                                         </Badge>
                                     </TableCell>
-                                    <TableCell className="text-right">
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="ghost" className="h-8 w-8 p-0">
-                                                    <span className="sr-only">Open menu</span>
-                                                    <MoreHorizontal className="h-4 w-4" />
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                {order.status === "pending" && (
-                                                    <>
-                                                        <DropdownMenuItem onClick={() => handleApproveOrder(order.id)}>
-                                                            Approve Order
+                                    {profile?.role !== 'auditor' && (
+                                        <TableCell className="text-right">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" className="h-8 w-8 p-0">
+                                                        <span className="sr-only">Open menu</span>
+                                                        <MoreHorizontal className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    {order.status === "pending" && (
+                                                        <>
+                                                            <DropdownMenuItem onClick={() => handleApproveOrder(order.id)}>
+                                                                Approve Order
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem
+                                                                onClick={() => handleCancelOrder(order.id, order.order_id)}
+                                                                className="text-red-600"
+                                                            >
+                                                                Cancel Order
+                                                            </DropdownMenuItem>
+                                                        </>
+                                                    )}
+                                                    {order.status === "ready" && (
+                                                        <DropdownMenuItem disabled>
+                                                            Ready for Fulfilment
                                                         </DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem 
-                                                            onClick={() => handleCancelOrder(order.id)}
-                                                            className="text-red-600"
-                                                        >
-                                                            Cancel Order
+                                                    )}
+                                                    {order.status === "cancelled" && (
+                                                        <DropdownMenuItem disabled>
+                                                            Order Cancelled
                                                         </DropdownMenuItem>
-                                                    </>
-                                                )}
-                                                {order.status === "approved" && (
-                                                    <DropdownMenuItem disabled>
-                                                        Order Already Approved
-                                                    </DropdownMenuItem>
-                                                )}
-                                                {order.status === "cancelled" && (
-                                                    <DropdownMenuItem disabled>
-                                                        Order Cancelled
-                                                    </DropdownMenuItem>
-                                                )}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </TableCell>
+                                                    )}
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </TableCell>
+                                    )}
                                 </TableRow>
                             ))
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={5} className="h-24 text-center">
+                                <TableCell colSpan={profile?.role !== 'auditor' ? 6 : 5} className="h-24 text-center">
                                     No orders found.
                                 </TableCell>
                             </TableRow>
@@ -235,18 +285,18 @@ export default function PendingOrders() {
                         Showing {startIndex + 1} to {endIndex} of {totalItems} orders
                     </p>
                     <div className="flex items-center gap-2">
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
+                        <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                             disabled={currentPage === 1}
                         >
                             Previous
                         </Button>
                         <span className="text-sm">Page {currentPage} of {totalPages}</span>
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
+                        <Button
+                            variant="outline"
+                            size="sm"
                             onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                             disabled={currentPage === totalPages}
                         >

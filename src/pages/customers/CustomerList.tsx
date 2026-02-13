@@ -26,9 +26,11 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
-import { Edit, Trash2, Search, Loader2 } from "lucide-react"
+import { Edit, Trash2, Search, Loader2, History } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { toast } from "sonner"
+import { useAuth } from "@/context/AuthContext"
+import CustomerHistorySheet from "./CustomerHistorySheet"
 
 interface Customer {
     id: number
@@ -49,6 +51,7 @@ interface CustomerType {
 }
 
 export default function CustomerList() {
+    const { profile } = useAuth()
     const [customers, setCustomers] = useState<Customer[]>([])
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
@@ -65,6 +68,10 @@ export default function CustomerList() {
         has_mou: false
     })
     const [saving, setSaving] = useState(false)
+
+    // History Sheet State
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false)
+    const [historyCustomer, setHistoryCustomer] = useState<Customer | null>(null)
 
     // Fetch Customers
     const fetchCustomers = async () => {
@@ -118,6 +125,11 @@ export default function CustomerList() {
             has_mou: customer.has_mou || false
         })
         setIsEditOpen(true)
+    }
+
+    const handleHistoryClick = (customer: Customer) => {
+        setHistoryCustomer(customer)
+        setIsHistoryOpen(true)
     }
 
     const handleSaveEdit = async () => {
@@ -199,7 +211,7 @@ export default function CustomerList() {
                             <TableHead>Phone</TableHead>
                             <TableHead>Customer Type</TableHead>
                             <TableHead className="text-right">Crates Balance</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
+                            {profile?.role !== 'auditor' && <TableHead className="text-right">Actions</TableHead>}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -230,23 +242,34 @@ export default function CustomerList() {
                                         </div>
                                     </TableCell>
                                     <TableCell className="text-right">{customer.balance}</TableCell>
-                                    <TableCell className="text-right">
-                                        <div className="flex justify-end gap-2">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                                                onClick={() => handleEditClick(customer)}
-                                            >
-                                                <Edit className="h-4 w-4" />
-                                                <span className="sr-only">Edit</span>
-                                            </Button>
-                                            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50">
-                                                <Trash2 className="h-4 w-4" />
-                                                <span className="sr-only">Delete</span>
-                                            </Button>
-                                        </div>
-                                    </TableCell>
+                                    {profile?.role !== 'auditor' && (
+                                        <TableCell className="text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                                                    onClick={() => handleHistoryClick(customer)}
+                                                >
+                                                    <History className="h-4 w-4" />
+                                                    <span className="sr-only">History</span>
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                                    onClick={() => handleEditClick(customer)}
+                                                >
+                                                    <Edit className="h-4 w-4" />
+                                                    <span className="sr-only">Edit</span>
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50">
+                                                    <Trash2 className="h-4 w-4" />
+                                                    <span className="sr-only">Delete</span>
+                                                </Button>
+                                            </div>
+                                        </TableCell>
+                                    )}
                                 </TableRow>
                             ))
                         ) : (
@@ -259,6 +282,13 @@ export default function CustomerList() {
                     </TableBody>
                 </Table>
             </div>
+
+            {/* History Sheet */}
+            <CustomerHistorySheet
+                customer={historyCustomer}
+                open={isHistoryOpen}
+                onOpenChange={setIsHistoryOpen}
+            />
 
             {/* Edit Customer Dialog */}
             <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
