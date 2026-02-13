@@ -10,7 +10,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, Search, Plus } from "lucide-react"
+import { Trash2, Search, Plus, Edit2 } from "lucide-react"
 import { supabase } from "@/lib/supabase"
 import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
@@ -283,7 +283,7 @@ export default function Products() {
                                                         className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
                                                         onClick={() => handleEditProduct(product)}
                                                     >
-                                                        <Edit className="h-4 w-4" />
+                                                        <Edit2 className="h-4 w-4" />
                                                         <span className="sr-only">Edit</span>
                                                     </Button>
                                                     <Button
