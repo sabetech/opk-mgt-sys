@@ -28,15 +28,15 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 
 interface Customer {
-    id: number
+    id: string
     name: string
     customer_types: {
         name: string
-    }
+    } | null
 }
 
 export default function CustomerReturnEmpties() {
@@ -57,30 +57,29 @@ export default function CustomerReturnEmpties() {
         async function fetchData() {
             try {
                 // Fetch Products
-                const { data: productsData, error: productsError } = await supabase
-                    .from('products')
-                    .select('id, sku_name')
-                    .eq('returnable', true)
-                    .order('sku_name')
-
-                if (productsError) throw productsError
-                if (productsData) {
-                    const transformedProducts: Product[] = productsData.map(item => ({
-                        id: item.id,
-                        name: item.sku_name
-                    }))
-                    setProducts(transformedProducts)
-                }
+                const productsData = await pb.collection('products').getFullList({
+                    filter: 'returnable = true',
+                    sort: 'sku_name',
+                    fields: 'id, sku_name'
+                })
+                const transformedProducts: Product[] = productsData.map((item) => ({
+                    id: item.id,
+                    name: item.sku_name
+                }))
+                setProducts(transformedProducts)
 
                 // Fetch Customers
-                const { data: customersData, error: customersError } = await supabase
-                    .from('customers')
-                    .select('id, name, customer_types(name)')
-                    .is('deleted_at', null)
-                    .order('name', { ascending: true })
-
-                if (customersError) throw customersError
-                setCustomers(customersData as any || [])
+                const customersData = await pb.collection('customers').getFullList({
+                    sort: 'name',
+                    filter: 'deleted_at = ""',
+                    expand: 'type_id',
+                    fields: 'id, name, type_id'
+                })
+                setCustomers(customersData.map((c) => ({
+                    id: c.id,
+                    name: c.name,
+                    customer_types: c.expand?.type_id ?? null,
+                })) || [])
                 setLoadingCustomers(false)
 
             } catch (error) {
@@ -104,31 +103,21 @@ export default function CustomerReturnEmpties() {
 
         try {
             // 1. Insert into empties_log
-            const { data: logData, error: logError } = await supabase
-                .from('empties_log')
-                .insert([{
-                    date: date.toISOString().split('T')[0],
-                    customer_id: parseInt(selectedCustomer),
-                    activity: 'customer_empties_return',
-                    total_quantity: totalQuantity
-                }])
-                .select()
-                .single()
-
-            if (logError) throw logError
+            const logData = await pb.collection('empties_log').create({
+                date: date.toISOString().split('T')[0],
+                customer_id: selectedCustomer,
+                activity: 'customer_empties_return',
+                total_quantity: totalQuantity
+            })
 
             // 2. Insert into empties_log_detail
-            const detailsToInsert = returnItems.map(item => ({
-                log_id: logData.id,
-                product_id: item.productId,
-                quantity: item.quantity
-            }))
-
-            const { error: detailError } = await supabase
-                .from('empties_log_detail')
-                .insert(detailsToInsert)
-
-            if (detailError) throw detailError
+            for (const item of returnItems) {
+                await pb.collection('empties_log_detail').create({
+                    log_id: logData.id,
+                    product_id: item.productId,
+                    quantity: item.quantity
+                })
+            }
 
             toast.success("Return recorded successfully!")
 

@@ -27,15 +27,15 @@ import {
 import { DateRangePicker } from "@/components/ui/date-range-picker"
 import type { RangeKeyDict, Range } from "react-date-range"
 
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { toast } from "sonner"
 import { useNavigate } from "react-router-dom"
 
 // Types
 interface OrderItem {
-    id: number
-    product_id: number
+    id: string
+    product_id: string
     quantity: number
     unit_price: number
     sub_total: number
@@ -47,11 +47,11 @@ interface OrderItem {
 }
 
 interface CompletedOrder {
-    id: number
-    order_id: number
+    id: string
+    order_id: string
     status: string
     orders: {
-        id: number
+        id: string
         date_time: string
         total_amount: number
         payment_type: string
@@ -78,47 +78,68 @@ export default function CompletedOrders() {
         }
     ])
     const [isDatePickerOpen, setIsDatePickerOpen] = useState(false)
-    const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
-    // Fetch approved orders from Supabase
+    // Fetch ready warehouse orders
     const fetchOrders = async () => {
         setLoading(true)
         try {
             const startDateStr = dateRange[0].startDate?.toISOString() || ""
             const endDateStr = dateRange[0].endDate?.toISOString() || ""
 
-            const { data, error } = await supabase
-                .from('warehouse_orders')
-                .select(`
-                    id, 
-                    order_id,
-                    status, 
-                    orders(
-                        id,
-                        date_time, 
-                        total_amount, 
-                        status, 
-                        payment_type,
-                        customers(name)
-                    ),
-                    warehouse_order_items (
-                        id,
-                        product_id,
-                        quantity,
-                        products (
-                            sku_name,
-                            code_name,
-                            returnable
-                        )
-                    )
-                `)
-                .eq('status', 'ready')
-                .gte('orders.date_time', startDateStr)
-                .lte('orders.date_time', endDateStr)
-                .order('created_at', { ascending: false })
+            const data = await pb.collection('warehouse_orders').getFullList({
+                filter: 'status = "ready"',
+                sort: '-created',
+                expand: 'order_id.customer_id',
+                fields: 'id, order_id, status'
+            })
 
-            if (error) throw error
-            setOrders(data as any || [])
+            const whOrderIds = data.map((w) => w.id)
+            const itemsData = whOrderIds.length > 0
+                ? await pb.collection('warehouse_order_items').getFullList({
+                    filter: whOrderIds.map(id => `warehouse_order_id = "${id}"`).join(' || '),
+                    expand: 'product_id',
+                })
+                : []
+
+            const itemsByWhOrder: Record<string, any[]> = {}
+            for (const item of itemsData) {
+                const rel = item.expand?.product_id
+                ;(itemsByWhOrder[item.warehouse_order_id] = itemsByWhOrder[item.warehouse_order_id] || []).push({
+                    id: item.id,
+                    product_id: item.product_id,
+                    quantity: item.quantity,
+                    unit_price: 0,
+                    sub_total: 0,
+                    products: rel
+                        ? { sku_name: rel.sku_name, code_name: rel.code_name, returnable: rel.returnable }
+                        : null,
+                })
+            }
+
+            const shaped = data.map((w) => {
+                const order = w.expand?.order_id ?? null
+                return {
+                    id: w.id,
+                    order_id: w.order_id,
+                    status: w.status,
+                    orders: order
+                        ? {
+                            id: order.id,
+                            date_time: order.date_time,
+                            total_amount: order.total_amount,
+                            payment_type: order.payment_type,
+                            customers: order.expand?.customer_id ?? null,
+                        }
+                        : null,
+                    warehouse_order_items: itemsByWhOrder[w.id] || []
+                }
+            }).filter((o) => {
+                if (!o.orders?.date_time) return true
+                return (!startDateStr || o.orders.date_time >= startDateStr) && (!endDateStr || o.orders.date_time <= endDateStr)
+            })
+
+            setOrders(shaped)
         } catch (err) {
             console.error("Error fetching completed orders:", err)
             toast.error("Failed to load completed orders")
@@ -148,7 +169,7 @@ export default function CompletedOrders() {
     const paginatedOrders = filteredOrders.slice(startIndex, endIndex)
 
     // Handle row expand/collapse
-    const toggleRowExpansion = (orderId: number) => {
+    const toggleRowExpansion = (orderId: string) => {
         setExpandedRows(prev => {
             const newSet = new Set(prev)
             if (newSet.has(orderId)) {

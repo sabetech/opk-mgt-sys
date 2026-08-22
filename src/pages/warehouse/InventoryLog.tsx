@@ -1,4 +1,4 @@
-import { supabase } from "@/lib/supabase"
+import { pb, dayFilter } from "@/lib/pocketbase"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { format } from "date-fns"
@@ -71,26 +71,21 @@ export default function InventoryLog() {
             const dateStr = date.toISOString().split('T')[0]
 
             // 1. Fetch all products
-            const { data: products, error: prodError } = await supabase
-                .from('products')
-                .select('id, sku_name')
-                .is('deleted_at', null)
-                .order('sku_name', { ascending: true })
-
-            if (prodError) throw prodError
+            const products = await pb.collection('products').getFullList({
+                filter: 'deleted_at = ""',
+                sort: 'sku_name',
+                fields: 'id, sku_name'
+            })
 
             // 2. Fetch logs for the selected date
-            const { data: logs, error: logsError } = await supabase
-                .from('inventory_logs')
-                .select('*')
-                .eq('date', dateStr)
-                .order('created_at', { ascending: true })
-
-            if (logsError) throw logsError
+            const logs = await pb.collection('inventory_logs').getFullList({
+                filter: dayFilter('date', dateStr),
+                sort: 'created'
+            })
 
             // 3. Process data
-            const processedData: ProductInventory[] = (products || []).map(product => {
-                const productLogs = (logs || []).filter((l: any) => l.product_id === product.id)
+            const processedData: ProductInventory[] = (products || []).map((product) => {
+                const productLogs = (logs || []).filter((l) => l.product_id === product.id)
 
                 let openingStock = 0
                 let totalReceived = 0
@@ -104,7 +99,7 @@ export default function InventoryLog() {
                 const transactions: Transaction[] = []
                 let runningBalance = 0
 
-                productLogs.forEach((log: any) => {
+                productLogs.forEach((log) => {
                     const qty = log.quantity
                     runningBalance += qty
 
@@ -118,7 +113,7 @@ export default function InventoryLog() {
 
                     transactions.push({
                         id: log.id.toString(),
-                        time: format(new Date(log.created_at), "hh:mm a"),
+                        time: format(new Date(log.created), "hh:mm a"),
                         description: log.description || log.type.replace(/_/g, ' '),
                         type: log.type as Transaction['type'],
                         quantity: qty,

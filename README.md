@@ -9,7 +9,7 @@ A robust, full-stack management system designed for distribution businesses, spe
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/)
 - **UI Components**: [Shadcn UI](https://ui.shadcn.com/) & [Radix UI](https://www.radix-ui.com/)
 - **Icons**: [Lucide React](https://lucide.dev/)
-- **Backend/Database**: [Supabase](https://supabase.com/) (PostgreSQL, Auth, Storage)
+- **Backend/Database**: [PocketBase](https://pocketbase.io/) (embedded SQLite, Auth, Storage)
 - **State Management**: React Context API
 - **Notifications**: [Sonner](https://sonner.stevenly.me/)
 
@@ -18,7 +18,7 @@ A robust, full-stack management system designed for distribution businesses, spe
 ### 👤 User & Role Management
 - **RBAC (Role-Based Access Control)**: Custom roles including Admin, Operations Manager, Sales Manager, Empties Manager, Cashier, and Auditor.
 - **Admin Dashboard**: Manage employee accounts, update roles, and create new users.
-- **Secure Authentication**: Powerded by Supabase Auth with custom database triggers for profile synchronization.
+- **Secure Authentication**: Powered by PocketBase Auth with a `role` field on the users collection and collection-level access rules.
 
 ### 📦 Warehouse & Inventory
 - **Inventory Logs**: Real-time tracking of stock levels, receipts, and sales.
@@ -33,14 +33,14 @@ A robust, full-stack management system designed for distribution businesses, spe
 
 ### 🚛 Logistics & Crates
 - **Crate Management**: Log incoming and outgoing crates from suppliers and customers.
-- **Delivery Tracking**: Record vehicle numbers and associate deliveries with Purchase Orders.
+- **Delivery Tracking**: Record vehicle numbers and associate deliveries with Purchase Orders (including PO image uploads stored as PocketBase file fields).
 
 ## ⚙️ Setup & Installation
 
 ### Prerequisites
 - Node.js (v18 or higher)
 - npm or yarn
-- A Supabase project
+- A running [PocketBase](https://pocketbase.io/) instance (download the binary and run `./pocketbase serve`)
 
 ### 1. Clone & Install
 ```bash
@@ -50,18 +50,19 @@ npm install
 ```
 
 ### 2. Environment Configuration
-Create a `.env` file in the root directory and add your Supabase credentials:
+Create a `.env` file in the root directory and point it at your PocketBase instance:
 ```env
-VITE_SUPABASE_URL=your_supabase_project_url
-VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+VITE_POCKETBASE_URL=http://127.0.0.1:8090
 ```
 
 ### 3. Database Setup
-Run the provided SQL scripts in the Supabase SQL Editor to initialize the schema. The scripts are located in the `sql_scripts/` directory:
-1. `sql_scripts/create_profiles_table.sql`: Sets up user roles and RLS.
-2. `sql_scripts/universal_db_fix.sql`: Consolidates all necessary RLS and Auth trigger fixes.
-3. `sql_scripts/create_inventory_logs_table.sql`: Initializes stock tracking.
-*(Note: Additional module-specific SQL files are also located in the `sql_scripts/` directory.)*
+Start PocketBase, then run the setup script to create all collections, seed reference data, import products from `data/products.csv`, seed empties rows, and create the initial admin user:
+```bash
+PB_SUPERUSER_EMAIL=your@superuser.com \
+PB_SUPERUSER_PASSWORD=your_password \
+node scripts/setup-pocketbase.js
+```
+The script is idempotent — existing collections are skipped, so it is safe to re-run.
 
 ### 4. Run Locally
 ```bash
@@ -69,7 +70,7 @@ npm run dev
 ```
 
 ## 🔒 Security
-The project utilizes **Row Level Security (RLS)** in Supabase to ensure data privacy. Most tables are protected by policies that check the `user_metadata` role assigned via Supabase Auth, preventing unauthorized access to sensitive management features.
+Access control is enforced through PocketBase collection rules. Authenticated users can only manage records permitted by their role (`@request.auth.role`), and the `users` collection restricts listing/editing to admins and self.
 
 ---
 Developed by **sabetech**

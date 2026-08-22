@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import bgImage from "@/assets/guinness-bg.png"
 
 export default function Login() {
@@ -19,18 +19,13 @@ export default function Login() {
         setLoading(true)
 
         try {
-            const { error } = await supabase.auth.signInWithPassword({
-                email,
-                password
-            })
-
-            if (error) throw error
+            await pb.collection('users').authWithPassword(email, password)
 
             toast.success("Login successful!")
             navigate("/dashboard")
         } catch (error: any) {
             console.error("Login error:", error)
-            toast.error(error.message || "Invalid email or password. Please try again.")
+            toast.error(error.response?.data?.message || error.message || "Invalid email or password. Please try again.")
         } finally {
             setLoading(false)
         }

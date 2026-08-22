@@ -54,8 +54,8 @@
 - **Returnable**: Dropdown (Yes/No)
 
 #### ✅ Database Integration:
-- **Supabase**: Uses existing client configuration
-- **Soft Delete**: Sets status='deleted' instead of removing
+- **PocketBase**: Uses existing client configuration
+- **Soft Delete**: Sets deleted_at instead of removing
 - **Error Handling**: User-friendly alerts with success/error messages
 - **Loading States**: Shows loading message during data fetch
 
@@ -88,18 +88,17 @@ const formatPrice = (price: number | null): string => {
 
 #### Database Query Pattern:
 ```typescript
-const { data, error } = await supabase
-  .from('products')
-  .select('*')
-  .eq('status', 'active')  // Only active products
-  .order('sku_name', { ascending: true })  // Default alphabetical sort
+const records = await pb.collection('products').getFullList({
+  filter: 'deleted_at = ""', // Only active products
+  sort: 'sku_name', // Default alphabetical sort
+})
 ```
 
 ### Testing Required:
 
 #### Database Setup:
-1. Run `add_status_column.sql` in Supabase SQL editor
-2. Verify all existing products have status='active'
+1. Run `node scripts/setup-pocketbase.js` to initialize the schema and seed data
+2. Verify all existing products have `deleted_at` empty
 
 #### Application Testing:
 1. Navigate to `/dashboard/warehouse/products`
@@ -114,13 +113,13 @@ const { data, error } = await supabase
 ### Integration Notes:
 - ✅ Follows existing CustomerList patterns
 - ✅ Uses Shadcn/ui components
-- ✅ Integrates with existing Supabase setup
+- ✅ Integrates with existing PocketBase setup
 - ✅ Maintains amber/guinness color scheme
 - ✅ Uses existing routing structure
 - ✅ Follows responsive design patterns
 
 ### Next Steps:
-1. User must run database migration script
+1. Run `node scripts/setup-pocketbase.js` to apply the database schema
 2. Test with real data in development environment
 3. Verify all CRUD operations work correctly
 4. Test with different screen sizes

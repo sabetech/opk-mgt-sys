@@ -27,26 +27,26 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Edit, Trash2, Search, Loader2, History } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 import CustomerHistorySheet from "./CustomerHistorySheet"
 
 interface Customer {
-    id: number
+    id: string
     name: string
     phone: string | null
     balance: number
     has_mou: boolean
-    type_id: number
+    type_id: string
     customer_types: {
-        id: number
+        id: string
         name: string
-    }
+    } | null
 }
 
 interface CustomerType {
-    id: number
+    id: string
     name: string
 }
 
@@ -76,22 +76,24 @@ export default function CustomerList() {
     // Fetch Customers
     const fetchCustomers = async () => {
         try {
-            const { data: customersData, error: customersError } = await supabase
-                .from('customers')
-                .select('id, name, phone, balance, type_id, has_mou, customer_types(id, name)')
-                .is('deleted_at', null)
-                .order('name', { ascending: true })
+            const customersRecords = await pb.collection('customers').getFullList({
+                sort: 'name',
+                filter: 'deleted_at = ""',
+                expand: 'type_id',
+                fields: 'id, name, phone, balance, type_id, has_mou'
+            })
+            setCustomers(customersRecords.map((r) => ({
+                id: r.id,
+                name: r.name,
+                phone: r.phone,
+                balance: r.balance,
+                has_mou: r.has_mou,
+                type_id: r.type_id,
+                customer_types: r.expand?.type_id ?? null,
+            })))
 
-            if (customersError) throw customersError
-            setCustomers(customersData as any || [])
-
-            const { data: typesData, error: typesError } = await supabase
-                .from('customer_types')
-                .select('id, name')
-                .order('name', { ascending: true })
-
-            if (typesError) throw typesError
-            setCustomerTypes(typesData || [])
+            const typesData = await pb.collection('customer_types').getFullList({ sort: 'name' })
+            setCustomerTypes(typesData.map((t) => ({ id: t.id, name: t.name })))
 
         } catch (err) {
             console.error("Error fetching customers:", err)
@@ -141,17 +143,12 @@ export default function CustomerList() {
 
         setSaving(true)
         try {
-            const { error } = await supabase
-                .from('customers')
-                .update({
-                    name: editForm.name,
-                    phone: editForm.phone || null,
-                    type_id: parseInt(editForm.type_id),
-                    has_mou: editForm.has_mou
-                })
-                .eq('id', editingCustomer.id)
-
-            if (error) throw error
+            await pb.collection('customers').update(editingCustomer.id, {
+                name: editForm.name,
+                phone: editForm.phone || null,
+                type_id: editForm.type_id,
+                has_mou: editForm.has_mou
+            })
 
             toast.success("Customer updated successfully!")
             setIsEditOpen(false)
@@ -231,7 +228,7 @@ export default function CustomerList() {
                                     <TableCell>{customer.phone || "N/A"}</TableCell>
                                     <TableCell>
                                         <div className="flex flex-col gap-1">
-                                            <Badge variant={getBadgeVariant(customer.customer_types?.name) as any}>
+                                            <Badge variant={getBadgeVariant(customer.customer_types?.name || "")}>
                                                 {customer.customer_types?.name}
                                             </Badge>
                                             {customer.has_mou && (

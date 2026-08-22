@@ -1,7 +1,10 @@
 import type { StockLevel } from './productTypes'
 
-export const getMockQuantity = (productId: number): number => {
-  const seed = productId * 17
+export const getMockQuantity = (productId: string): number => {
+  let seed = 0
+  for (let i = 0; i < productId.length; i++) {
+    seed = (seed * 31 + productId.charCodeAt(i)) % 100000
+  }
   return (seed % 95) + 5 // Range: 5-99
 }
 

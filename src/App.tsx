@@ -29,6 +29,14 @@ import { AuthProvider } from "@/context/AuthContext"
 import { Toaster } from "sonner"
 import AddUser from "@/pages/admin/AddUser"
 import ManageUsers from "@/pages/admin/ManageUsers"
+import StocksComingIn from "@/pages/operations/StocksComingIn"
+import StocksComingInLog from "@/pages/operations/StocksComingInLog"
+import Adjustments from "@/pages/operations/Adjustments"
+import ReloadTruckEmpties from "@/pages/operations/ReloadTruckEmpties"
+import TruckReloadsToGGBL from "@/pages/operations/TruckReloadsToGGBL"
+import AdjustmentsLog from "@/pages/operations/AdjustmentsLog"
+import OperationsOverview from "@/pages/operations/OperationsOverview"
+import Setup from "@/pages/operations/Setup"
 import ProtectedRoute from "@/components/ProtectedRoute"
 
 function App() {
@@ -112,6 +120,50 @@ function App() {
                   </ProtectedRoute>
                 } />
                 <Route path="stock-reports" element={<StockReport />} />
+              </Route>
+
+              {/* Operations */}
+              <Route path="operations" element={<Outlet />}>
+                <Route index element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                    <OperationsOverview />
+                  </ProtectedRoute>
+                } />
+                <Route path="reload-truck-empties" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                    <ReloadTruckEmpties />
+                  </ProtectedRoute>
+                } />
+                <Route path="stocks-coming-in" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                    <StocksComingIn />
+                  </ProtectedRoute>
+                } />
+                <Route path="adjustments" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                    <Adjustments />
+                  </ProtectedRoute>
+                } />
+                <Route path="adjustments-log" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                    <AdjustmentsLog />
+                  </ProtectedRoute>
+                } />
+                <Route path="stocks-coming-in-log" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                    <StocksComingInLog />
+                  </ProtectedRoute>
+                } />
+                <Route path="truck-reloads-to-ggbl" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                    <TruckReloadsToGGBL />
+                  </ProtectedRoute>
+                } />
+                <Route path="setup" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                    <Setup />
+                  </ProtectedRoute>
+                } />
               </Route>
 
               {/* POS */}

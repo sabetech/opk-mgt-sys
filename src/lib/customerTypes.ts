@@ -1,14 +1,14 @@
 export interface CustomerType {
-    id: number;
+    id: string;
     name: string;
 }
 
 export interface Customer {
-    id: number;
+    id: string;
     created_at: string;
     name: string;
     phone: string;
-    type_id: number;
+    type_id: string;
     balance: number;
     has_mou: boolean;
     deleted_at: string | null;

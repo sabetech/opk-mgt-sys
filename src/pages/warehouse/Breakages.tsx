@@ -13,7 +13,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import {
     Popover,
@@ -27,14 +27,14 @@ import { cn } from "@/lib/utils"
 
 interface BreakageItem {
     id: string
-    productId: number
+    productId: string
     productCode: string
     productName: string
     quantity: number
 }
 
 interface BreakageRecord {
-    id: number
+    id: string
     date: string
     quantity: number
     reason: string
@@ -80,15 +80,12 @@ export default function Breakages() {
 
     const fetchProducts = async () => {
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('*')
-                .is('deleted_at', null)
-                .order('sku_name', { ascending: true })
+            const data = await pb.collection('products').getFullList({
+                filter: 'deleted_at = ""',
+                sort: 'sku_name'
+            })
 
-            if (error) throw error
-
-            const transformedProducts: Product[] = (data || []).map((item: any) => ({
+            const transformedProducts: Product[] = data.map((item) => ({
                 id: item.id,
                 name: item.sku_name,
                 code: item.code_name || ''
@@ -109,24 +106,24 @@ export default function Breakages() {
             const startDateStr = dateRange[0].startDate?.toISOString().split('T')[0] || ""
             const endDateStr = dateRange[0].endDate?.toISOString().split('T')[0] || ""
 
-            const { data, error } = await supabase
-                .from('breakages')
-                .select(`
-                    id,
-                    date,
-                    quantity,
-                    reason,
-                    products (
-                        sku_name,
-                        code_name
-                    )
-                `)
-                .gte('date', startDateStr)
-                .lte('date', endDateStr)
-                .order('date', { ascending: false })
+            const data = await pb.collection('breakages').getFullList({
+                filter: `date >= "${startDateStr}" && date <= "${endDateStr}"`,
+                sort: '-date',
+                expand: 'product_id',
+                fields: 'id, date, quantity, reason'
+            })
 
-            if (error) throw error
-            setRecords(data as any || [])
+            const shaped = data.map((b) => {
+                const rel = b.expand?.product_id
+                return {
+                    id: b.id,
+                    date: b.date,
+                    quantity: b.quantity,
+                    reason: b.reason,
+                    products: rel ? { sku_name: rel.sku_name, code_name: rel.code_name } : null,
+                }
+            })
+            setRecords(shaped)
         } catch (error) {
             console.error('Error fetching breakage records:', error)
             toast.error('Failed to load breakage records')
@@ -160,18 +157,14 @@ export default function Breakages() {
 
         setSaving(true)
         try {
-            const itemsToInsert = breakageItems.map((item: BreakageItem) => ({
-                date,
-                product_id: item.productId,
-                quantity: item.quantity,
-                reason: reason.trim() || 'Breakage'
-            }))
-
-            const { error } = await supabase
-                .from('breakages')
-                .insert(itemsToInsert)
-
-            if (error) throw error
+            for (const item of breakageItems) {
+                await pb.collection('breakages').create({
+                    date,
+                    product_id: item.productId,
+                    quantity: item.quantity,
+                    reason: reason.trim() || 'Breakage'
+                })
+            }
 
             toast.success('Breakages recorded successfully and stock updated!')
             setBreakageItems([])

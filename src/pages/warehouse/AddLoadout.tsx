@@ -25,7 +25,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -59,23 +59,14 @@ export default function AddLoadout() {
     const fetchVses = async () => {
         try {
             // First get the type_id for 'Retailer (VSE)'
-            const { data: typeData, error: typeError } = await supabase
-                .from('customer_types')
-                .select('id')
-                .eq('name', 'Retailer (VSE)')
-                .single()
+            const typeData = await pb.collection('customer_types').getFirstListItem('name = "Retailer (VSE)"')
 
-            if (typeError) throw typeError
-
-            const { data, error } = await supabase
-                .from('customers')
-                .select('id, name')
-                .eq('type_id', typeData.id)
-                .is('deleted_at', null)
-                .order('name', { ascending: true })
-
-            if (error) throw error
-            setVseList(data as any || [])
+            const data = await pb.collection('customers').getFullList({
+                filter: `type_id = "${typeData.id}" && deleted_at = ""`,
+                sort: 'name',
+                fields: 'id, name'
+            })
+            setVseList(data.map((v) => ({ id: v.id, name: v.name })))
         } catch (error) {
             console.error('Error fetching VSEs:', error)
             toast.error('Failed to load VSE list')
@@ -84,15 +75,12 @@ export default function AddLoadout() {
 
     const fetchProducts = async () => {
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('*')
-                .is('deleted_at', null)
-                .order('sku_name', { ascending: true })
+            const data = await pb.collection('products').getFullList({
+                filter: 'deleted_at = ""',
+                sort: 'sku_name'
+            })
 
-            if (error) throw error
-
-            const transformedProducts: Product[] = (data || []).map(item => ({
+            const transformedProducts: Product[] = data.map((item) => ({
                 id: item.id,
                 name: item.sku_name,
                 code: item.code_name || ''
@@ -122,30 +110,20 @@ export default function AddLoadout() {
         setSaving(true)
         try {
             // 1. Create Loadout Header
-            const { data: loadout, error: loadoutError } = await supabase
-                .from('loadouts')
-                .insert({
-                    date: date.toISOString().split('T')[0],
-                    vse_id: parseInt(selectedVse),
-                    status: 'approved' // Set to approved to trigger stock deduction immediately
-                })
-                .select()
-                .single()
-
-            if (loadoutError) throw loadoutError
+            const loadout = await pb.collection('loadouts').create({
+                date: date.toISOString().split('T')[0],
+                vse_id: selectedVse,
+                status: 'approved' // Set to approved to trigger stock deduction immediately
+            })
 
             // 2. Create Loadout Items
-            const itemsToInsert = selectedItems.map(item => ({
-                loadout_id: loadout.id,
-                product_id: item.productId,
-                quantity: item.quantity
-            }))
-
-            const { error: itemsError } = await supabase
-                .from('loadout_items')
-                .insert(itemsToInsert)
-
-            if (itemsError) throw itemsError
+            for (const item of selectedItems) {
+                await pb.collection('loadout_items').create({
+                    loadout_id: loadout.id,
+                    product_id: item.productId,
+                    quantity: item.quantity
+                })
+            }
 
             toast.success('Loadout submitted and inventory updated')
 
@@ -224,7 +202,7 @@ export default function AddLoadout() {
                                     className="w-full justify-between"
                                 >
                                     {selectedVse
-                                        ? vseList.find((vse: any) => vse.id === parseInt(selectedVse))?.name
+                                        ? vseList.find((vse) => vse.id === selectedVse)?.name
                                         : "Select VSE..."}
                                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                 </Button>
@@ -235,7 +213,7 @@ export default function AddLoadout() {
                                     <CommandList>
                                         <CommandEmpty>No VSE found.</CommandEmpty>
                                         <CommandGroup>
-                                            {vseList.map((vse: any) => (
+                                            {vseList.map((vse) => (
                                                 <CommandItem
                                                     key={vse.id}
                                                     value={vse.name}

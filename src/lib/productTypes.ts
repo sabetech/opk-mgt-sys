@@ -1,11 +1,11 @@
 export interface Product {
-  id: number
+  id: string
   sku_name: string
   code_name: string | null
   wholesale_price: number | null
   retail_price: number | null
   returnable: boolean
-  created_at: string
+  created: string
   deleted_at: string | null
   quantity: number // Mocked quantity
 }

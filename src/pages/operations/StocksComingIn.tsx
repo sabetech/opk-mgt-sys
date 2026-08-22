@@ -39,7 +39,7 @@ interface ReceivableForm {
     items: ReceivableItem[]
 }
 
-export default function RecordReceivable() {
+export default function StocksComingIn() {
     const [products, setProducts] = useState<Product[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -203,7 +203,7 @@ export default function RecordReceivable() {
                 })
             }
 
-            toast.success('Receivable recorded successfully and stock updated!')
+            toast.success('Stock coming in recorded successfully and stock updated!')
 
             // Reset form
             setFormData({
@@ -221,7 +221,7 @@ export default function RecordReceivable() {
 
         } catch (error) {
             console.error('Error submitting receivable:', error)
-            toast.error('Failed to record receivable')
+            toast.error('Failed to record stock coming in')
         } finally {
             setSaving(false)
         }
@@ -231,7 +231,7 @@ export default function RecordReceivable() {
         return (
             <div className="space-y-6">
                 <div className="flex items-center">
-                    <h1 className="text-lg font-semibold md:text-2xl">Record Receivable</h1>
+                    <h1 className="text-lg font-semibold md:text-2xl">Stocks Coming In</h1>
                 </div>
                 <div className="flex items-center justify-center h-64">
                     <div className="flex flex-col items-center gap-2">
@@ -248,9 +248,9 @@ export default function RecordReceivable() {
             {/* Header */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Record Receivable</h2>
+                    <h2 className="text-3xl font-bold tracking-tight">Stocks Coming In</h2>
                     <p className="text-muted-foreground">
-                        Receive product supplies from Guinness Ghana
+                        Receive incoming product supplies
                     </p>
                 </div>
             </div>
@@ -261,7 +261,7 @@ export default function RecordReceivable() {
                     <CardHeader>
                         <CardTitle>Delivery Information</CardTitle>
                         <CardDescription>
-                            Enter the delivery details from Guinness Ghana
+                            Enter the delivery details for incoming stock
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -460,7 +460,7 @@ export default function RecordReceivable() {
                         disabled={saving || formData.items.length === 0}
                     >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                        {saving ? "Recording..." : "Record Receivable"}
+                        {saving ? "Recording..." : "Record Stocks Coming In"}
                     </Button>
                 </div>
             </form>

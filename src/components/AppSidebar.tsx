@@ -2,14 +2,14 @@ import {
     Beer,
     LayoutDashboard,
     Users,
-    Package2,
     Warehouse,
     ShoppingCart,
     FileBarChart,
     ChevronDown,
     Menu,
     LogOut,
-    User
+    User,
+    Truck
 } from "lucide-react"
 import { useNavigate, NavLink, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
@@ -71,18 +71,6 @@ export function AppSidebar({ className }: SidebarProps) {
             ],
         },
         {
-            title: "Crates Mgt",
-            icon: Package2,
-            href: "/dashboard/crates",
-            roles: ["admin", "empties_manager", "auditor"],
-            children: [
-                { title: "Crates Overview", href: "/dashboard/crates/overview", roles: ["admin", "empties_manager", "auditor"] },
-                { title: "Crates Brought In", href: "/dashboard/crates/brought-in", roles: ["admin", "empties_manager", "auditor"] },
-                { title: "Crates Returned", href: "/dashboard/crates/returned", roles: ["admin", "empties_manager", "auditor"] },
-                { title: "Return Crates", href: "/dashboard/crates/return-crates", roles: ["admin", "empties_manager"] },
-            ],
-        },
-        {
             title: "Warehouse",
             icon: Warehouse,
             href: "/dashboard/warehouse",
@@ -100,6 +88,22 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Take Stock", href: "/dashboard/warehouse/take-stock", roles: ["admin", "operations_manager"] },
                 { title: "Breakages", href: "/dashboard/warehouse/breakages", roles: ["admin", "operations_manager"] },
                 { title: "Stock Reports", href: "/dashboard/warehouse/stock-reports", roles: ["admin", "operations_manager", "auditor"] },
+            ],
+        },
+        {
+            title: "Operations",
+            icon: Truck,
+            href: "/dashboard/operations",
+            roles: ["admin", "operations_manager", "auditor"],
+            children: [
+                { title: "Overview", href: "/dashboard/operations", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Stocks Coming In", href: "/dashboard/operations/stocks-coming-in", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Reload Truck with Empties", href: "/dashboard/operations/reload-truck-empties", roles: ["admin", "operations_manager"] },
+                { title: "Adjustments", href: "/dashboard/operations/adjustments", roles: ["admin", "operations_manager"] },
+                { title: "Stocks Coming In Log", href: "/dashboard/operations/stocks-coming-in-log", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Truck Reloads to GGBL", href: "/dashboard/operations/truck-reloads-to-ggbl", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Adjustments Log", href: "/dashboard/operations/adjustments-log", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Setup", href: "/dashboard/operations/setup", roles: ["admin", "operations_manager"] },
             ],
         },
         {

@@ -19,7 +19,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 
@@ -29,7 +29,7 @@ interface ProductBreakdown {
 }
 
 interface CrateReturn {
-    id: number
+    id: string
     date: string
     quantityReturned: number
     vehicleNumber: string
@@ -49,7 +49,7 @@ export default function CratesReturned() {
             key: 'selection'
         }
     ])
-    const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
     const fetchData = async () => {
         setLoading(true)
@@ -58,28 +58,32 @@ export default function CratesReturned() {
             const endDate = dateRange[0].endDate?.toISOString().split('T')[0]
 
             // 1. Fetch Returns (empties_log)
-            let query = supabase
-                .from('empties_log')
-                .select(`
-                    id,
-                    date,
-                    total_quantity,
-                    vehicle_no,
-                    returned_by,
-                    empties_log_detail (
-                        quantity,
-                        products (sku_name)
-                    )
-                `)
-                .eq('activity', 'empties_to_supplier')
-                .order('date', { ascending: false })
+            let filter = 'activity = "empties_to_supplier"'
+            if (startDate) filter += ` && date >= "${startDate}"`
+            if (endDate) filter += ` && date <= "${endDate}"`
 
-            if (startDate) query = query.gte('date', startDate)
-            if (endDate) query = query.lte('date', endDate)
+            const logsData = await pb.collection('empties_log').getFullList({
+                filter,
+                sort: '-date',
+                fields: 'id, date, total_quantity, vehicle_no, returned_by'
+            })
 
-            const { data: logsData, error: logsError } = await query
+            const logIds = logsData.map((log) => log.id)
+            const detailData = logIds.length > 0
+                ? await pb.collection('empties_log_detail').getFullList({
+                    filter: logIds.map(id => `log_id = "${id}"`).join(' || '),
+                    expand: 'product_id',
+                })
+                : []
 
-            if (logsError) throw logsError
+            const detailsByLog: Record<string, any[]> = {}
+            for (const detail of detailData) {
+                const rel = detail.expand?.product_id
+                ;(detailsByLog[detail.log_id] = detailsByLog[detail.log_id] || []).push({
+                    quantity: detail.quantity,
+                    productName: rel?.sku_name || "Unknown",
+                })
+            }
 
             const transformedReturns: CrateReturn[] = (logsData || []).map(log => ({
                 id: log.id,
@@ -87,21 +91,14 @@ export default function CratesReturned() {
                 quantityReturned: log.total_quantity,
                 vehicleNumber: log.vehicle_no || "N/A",
                 returnedBy: log.returned_by || "N/A",
-                products: (log.empties_log_detail as any[] || []).map(detail => ({
-                    productName: detail.products?.sku_name || "Unknown",
-                    quantity: detail.quantity
-                }))
+                products: detailsByLog[log.id] || []
             }))
 
             setReturns(transformedReturns)
 
             // 2. Fetch Total Stock (for the "Crates Remaining" stat)
-            const { data: stockData, error: stockError } = await supabase
-                .from('warehouse_stock')
-                .select('quantity')
-
-            if (stockError) throw stockError
-            const total = stockData.reduce((sum, item) => sum + item.quantity, 0)
+            const stockData = await pb.collection('warehouse_stock').getFullList({ fields: 'quantity' })
+            const total = stockData.reduce((sum: number, item) => sum + (item.quantity || 0), 0)
             setTotalStock(total)
 
         } catch (error: any) {
@@ -116,7 +113,7 @@ export default function CratesReturned() {
         fetchData()
     }, [dateRange])
 
-    const toggleRow = (id: number) => {
+    const toggleRow = (id: string) => {
         const newExpanded = new Set(expandedRows)
         if (newExpanded.has(id)) {
             newExpanded.delete(id)
@@ -126,20 +123,15 @@ export default function CratesReturned() {
         setExpandedRows(newExpanded)
     }
 
-    const handleEdit = (_id: number) => {
+    const handleEdit = (_id: string) => {
         toast.info("Edit functionality coming soon")
     }
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!confirm(`Are you sure you want to delete return record #${id}?`)) return
 
         try {
-            const { error } = await supabase
-                .from('empties_log')
-                .delete()
-                .eq('id', id)
-
-            if (error) throw error
+            await pb.collection('empties_log').delete(id)
             toast.success("Record deleted")
             fetchData()
         } catch (error: any) {

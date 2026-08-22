@@ -1,14 +1,14 @@
 # 🎉 Warehouse Products Implementation Complete
 
 ## Database Schema Updated ✅
-- **Field Added**: `deleted_at TIMESTAMP WITH TIME ZONE` for soft deletion
-- **Migration Script**: `add_status_column.sql` updated for `deleted_at` field
-- **Query Pattern**: `.is('deleted_at', null)` to fetch only active products
+- **Field Added**: `deleted_at` for soft deletion
+- **Migration Script**: `scripts/setup-pocketbase.js` includes the `deleted_at` field
+- **Query Pattern**: `filter: 'deleted_at = ""'` to fetch only active products
 
 ## All Components Working ✅
 
 ### 1. **Products Table** (`src/pages/warehouse/Products.tsx`)
-- ✅ **GET Request**: Fetches products with `.is('deleted_at', null)`
+- ✅ **GET Request**: Fetches products with `filter: 'deleted_at = ""'`
 - ✅ **Mock Quantities**: 5-99 range with consistent distribution
 - ✅ **Search**: Real-time by product name and SKU code  
 - ✅ **Filters**: All/Returnable/Non-Returnable
@@ -48,7 +48,7 @@
 
 ### **Soft Delete Implementation**
 - **Method**: Updates `deleted_at` with current timestamp
-- **Query**: `.is('deleted_at', null)` filters out deleted products
+- **Query**: `filter: 'deleted_at = ""'` filters out deleted products
 - **Confirmation**: Dialog shows product name before deletion
 
 ### **Search & Filter**
@@ -77,11 +77,11 @@
 ## Ready for Testing 🚀
 
 ### **Database Setup**
-✅ Migration script created: `add_status_column.sql`
-✅ Database field: `deleted_at TIMESTAMP WITH TIME ZONE`
+✅ Migration script created: `scripts/setup-pocketbase.js`
+✅ Database field: `deleted_at` for soft deletion
 
 ### **Testing Checklist**
-1. ✅ Run migration in Supabase SQL editor
+1. ✅ Run `node scripts/setup-pocketbase.js` to initialize the schema
 2. ✅ Navigate to `/dashboard/warehouse/products`
 3. ✅ Verify products load with mocked quantities
 4. ✅ Test search functionality
@@ -95,7 +95,7 @@
 ### **Integration Status** ✅
 - ✅ Follows existing CustomerList patterns
 - ✅ Uses Shadcn/ui components
-- ✅ Integrates with existing Supabase setup
+- ✅ Integrates with existing PocketBase setup
 - ✅ Maintains amber/guinness color scheme
 - ✅ Responsive design for all screen sizes
 - ✅ TypeScript compilation successful

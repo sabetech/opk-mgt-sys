@@ -11,11 +11,12 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Trash2, Search, Plus, Edit2 } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { getMockQuantity, formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
 import ProductDialog from "./ProductDialog"
+import { toast } from "sonner"
 
 const ITEMS_PER_PAGE = 20
 
@@ -36,24 +37,28 @@ export default function Products() {
 
     const fetchProducts = async () => {
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('*')
-                .is('deleted_at', null) // Only get non-deleted products
-                .order('sku_name', { ascending: true })
-
-            if (error) throw error
+            const data = await pb.collection('products').getFullList({
+                filter: 'deleted_at = ""', // Only get non-deleted products
+                sort: 'sku_name'
+            })
 
             // Add mock quantities
-            const productsWithQuantity = data.map(product => ({
-                ...product,
+            const productsWithQuantity = data.map((product) => ({
+                id: product.id,
+                sku_name: product.sku_name,
+                code_name: product.code_name,
+                wholesale_price: product.wholesale_price,
+                retail_price: product.retail_price,
+                returnable: product.returnable,
+                created: product.created,
+                deleted_at: product.deleted_at,
                 quantity: getMockQuantity(product.id)
             }))
 
             setProducts(productsWithQuantity)
         } catch (error) {
             console.error('Error fetching products:', error)
-            alert('❌ Failed to load products')
+            toast.error('Failed to load products')
         } finally {
             setLoading(false)
         }
@@ -91,18 +96,13 @@ export default function Products() {
         try {
             if (editingProduct) {
                 // Update existing product
-                const { error } = await supabase
-                    .from('products')
-                    .update({
-                        sku_name: formData.sku_name,
-                        code_name: formData.code_name || null,
-                        wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
-                        retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
-                        returnable: formData.returnable
-                    })
-                    .eq('id', editingProduct.id)
-
-                if (error) throw error
+                await pb.collection('products').update(editingProduct.id, {
+                    sku_name: formData.sku_name,
+                    code_name: formData.code_name || null,
+                    wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
+                    retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
+                    returnable: formData.returnable
+                })
 
                 // Update local state
                 setProducts(prev => prev.map(p =>
@@ -114,23 +114,26 @@ export default function Products() {
                 alert('✅ Product updated successfully!')
             } else {
                 // Add new product
-                const { data, error } = await supabase
-                    .from('products')
-                    .insert([{
-                        sku_name: formData.sku_name,
-                        code_name: formData.code_name || null,
-                        wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
-                        retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
-                        returnable: formData.returnable,
-                        // status: 'active' // Will be added after migration
-                    }])
-                    .select()
-                    .single()
-
-                if (error) throw error
+                const data = await pb.collection('products').create({
+                    sku_name: formData.sku_name,
+                    code_name: formData.code_name || null,
+                    wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
+                    retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
+                    returnable: formData.returnable
+                })
 
                 // Add to local state with mock quantity
-                const newProduct = { ...data, quantity: getMockQuantity(data.id) }
+                const newProduct: Product = {
+                    id: data.id,
+                    sku_name: formData.sku_name,
+                    code_name: formData.code_name || null,
+                    wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
+                    retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
+                    returnable: formData.returnable,
+                    created: data.created,
+                    deleted_at: data.deleted_at ?? null,
+                    quantity: getMockQuantity(data.id)
+                }
                 setProducts(prev => [...prev, newProduct])
 
                 alert('✅ Product added successfully!')
@@ -149,12 +152,7 @@ export default function Products() {
         }
 
         try {
-            const { error } = await supabase
-                .from('products')
-                .update({ deleted_at: new Date().toISOString() }) // Soft delete
-                .eq('id', product.id)
-
-            if (error) throw error
+            await pb.collection('products').update(product.id, { deleted_at: new Date().toISOString() }) // Soft delete
 
             // Remove from local state
             setProducts(prev => prev.filter(p => p.id !== product.id))

@@ -17,7 +17,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 
@@ -27,7 +27,7 @@ interface ProductBreakdown {
 }
 
 interface CrateDelivery {
-    id: number
+    id: string
     date: string
     quantityReceived: number
     vehicleNumber: string
@@ -43,58 +43,62 @@ export default function CratesBroughtIn() {
     const [deliveries, setDeliveries] = useState<CrateDelivery[]>([])
     const [totalStock, setTotalStock] = useState(0)
     const [loading, setLoading] = useState(true)
-    const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
+    const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
     const [previewImage, setPreviewImage] = useState<string | null>(null)
 
     // Fetch Data
     const fetchData = async () => {
         setLoading(true)
         try {
-            // 1. Fetch Deliveries (inventory_receivables joined with items)
-            const { data: receivablesData, error: receivablesError } = await supabase
-                .from('inventory_receivables')
-                .select(`
-                    id,
-                    date,
-                    vehicle_no,
-                    purchase_order_number,
-                    received_by,
-                    delivered_by,
-                    purchase_order_img_url,
-                    inventory_receivable_items (
-                        qty,
-                        products (sku_name)
-                    )
-                `)
-                .order('date', { ascending: false })
+            // 1. Fetch Deliveries (inventory_receivables)
+            const receivablesData = await pb.collection('inventory_receivables').getFullList({
+                sort: '-date',
+                fields: 'id, date, vehicle_no, purchase_order_number, received_by, delivered_by, purchase_order_img'
+            })
 
-            if (receivablesError) throw receivablesError
+            const receivableIds = receivablesData.map((r) => r.id)
+
+            // 2. Fetch items for those receivables (with product names)
+            const itemsData = receivableIds.length > 0
+                ? await pb.collection('inventory_receivable_items').getFullList({
+                    filter: receivableIds.map(id => `receivable_id = "${id}"`).join(' || '),
+                    expand: 'product_id',
+                })
+                : []
+
+            const itemsByReceivable: Record<string, any[]> = {}
+            for (const item of itemsData) {
+                const rel = item.expand?.product_id
+                ;(itemsByReceivable[item.receivable_id] = itemsByReceivable[item.receivable_id] || []).push({
+                    qty: item.qty,
+                    productName: rel?.sku_name || "Unknown Product",
+                })
+            }
 
             if (receivablesData) {
-                const transformed: CrateDelivery[] = receivablesData.map(item => ({
-                    id: item.id,
-                    date: item.date,
-                    quantityReceived: item.inventory_receivable_items?.reduce((sum: number, r: any) => sum + r.qty, 0) || 0,
-                    vehicleNumber: item.vehicle_no,
-                    purchaseOrderNumber: item.purchase_order_number,
-                    receivedBy: item.received_by,
-                    deliveredBy: item.delivered_by,
-                    purchaseOrderImage: item.purchase_order_img_url,
-                    products: item.inventory_receivable_items?.map((r: any) => ({
-                        productName: r.products?.sku_name || "Unknown Product",
-                        quantity: r.qty
-                    })) || []
-                }))
+                const transformed: CrateDelivery[] = receivablesData.map((item) => {
+                    const items = itemsByReceivable[item.id] || []
+                    return {
+                        id: item.id,
+                        date: item.date,
+                        quantityReceived: items.reduce((sum: number, r) => sum + r.qty, 0),
+                        vehicleNumber: item.vehicle_no,
+                        purchaseOrderNumber: item.purchase_order_number,
+                        receivedBy: item.received_by,
+                        deliveredBy: item.delivered_by,
+                        purchaseOrderImage: item.purchase_order_img ? pb.files.getURL(item, item.purchase_order_img) : null,
+                        products: items.map((r) => ({
+                            productName: r.productName,
+                            quantity: r.qty
+                        }))
+                    }
+                })
                 setDeliveries(transformed)
             }
 
-            // 2. Fetch Total Stock (warehouse_stock)
-            const { data: stockData, error: stockError } = await supabase
-                .from('warehouse_stock')
-                .select('quantity')
-
-            if (stockError) throw stockError
-            const total = stockData?.reduce((sum, item) => sum + item.quantity, 0) || 0
+            // 3. Fetch Total Stock (warehouse_stock)
+            const stockData = await pb.collection('warehouse_stock').getFullList({ fields: 'quantity' })
+            const total = stockData?.reduce((sum: number, item) => sum + (item.quantity || 0), 0) || 0
             setTotalStock(total)
 
         } catch (error) {
@@ -109,7 +113,7 @@ export default function CratesBroughtIn() {
         fetchData()
     }, [])
 
-    const toggleRow = (id: number) => {
+    const toggleRow = (id: string) => {
         const newExpanded = new Set(expandedRows)
         if (newExpanded.has(id)) {
             newExpanded.delete(id)
@@ -119,21 +123,16 @@ export default function CratesBroughtIn() {
         setExpandedRows(newExpanded)
     }
 
-    const handleEdit = (id: number) => {
+    const handleEdit = (id: string) => {
         console.log("Edit delivery:", id)
         // Future implementation: Open edit dialog
     }
 
-    const handleDelete = async (id: number) => {
+    const handleDelete = async (id: string) => {
         if (!confirm(`Are you sure you want to delete delivery #${id}? This will NOT automatically revert stock changes unless a trigger specifically handles deletes.`)) return
 
         try {
-            const { error } = await supabase
-                .from('inventory_receivables')
-                .delete()
-                .eq('id', id)
-
-            if (error) throw error
+            await pb.collection('inventory_receivables').delete(id)
             toast.success("Record deleted successfully.")
             fetchData()
         } catch (error: any) {

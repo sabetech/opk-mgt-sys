@@ -9,22 +9,11 @@ import { toast } from 'sonner';
 import { useAuth, type UserRole } from '@/context/AuthContext';
 import { Loader2, UserPlus } from 'lucide-react';
 
-import { createClient } from '@supabase/supabase-js';
+import { pb } from '@/lib/pocketbase';
 
 export default function AddUser() {
     const { profile } = useAuth();
     const navigate = useNavigate();
-
-    // Create a separate supabase client for user creation to avoid logging out the admin
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    const adminSupabase = createClient(supabaseUrl, supabaseAnonKey, {
-        auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false
-        }
-    });
 
     const [loading, setLoading] = useState(false);
     const [name, setName] = useState('');
@@ -46,28 +35,15 @@ export default function AddUser() {
         setLoading(true);
 
         try {
-            // Note: In a production Supabase app, you'd typically use a Service Role Key 
-            // from a backend/edge function to create users without them having to confirm email
-            // or use supabase.auth.admin.createUser().
-            // For this UI demonstration, we'll use the signup method which might require email verification
-            // depending on Supabase project settings.
-            const { data, error: signUpError } = await adminSupabase.auth.signUp({
+            await pb.collection('users').create({
                 email,
                 password,
-                options: {
-                    data: {
-                        full_name: name,
-                        role: role
-                    }
-                }
+                passwordConfirm: password,
+                name,
+                role
             });
 
-            if (signUpError) {
-                console.error('[AddUser] Signup error:', signUpError);
-                throw signUpError;
-            }
-
-            console.log('[AddUser] User created successfully:', data);
+            console.log('[AddUser] User created successfully');
 
             toast.success(`User ${name} created successfully!`);
 
@@ -78,7 +54,7 @@ export default function AddUser() {
             setRole('auditor');
         } catch (error: any) {
             console.error('Error creating user:', error);
-            toast.error(error.message || 'Failed to create user');
+            toast.error(error.response?.data?.message || error.message || 'Failed to create user');
         } finally {
             setLoading(false);
         }

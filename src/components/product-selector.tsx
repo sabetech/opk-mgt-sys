@@ -20,7 +20,7 @@ import {
 
 // Product interface that can be extended
 export interface Product {
-    id: number
+    id: string
     name: string
     code?: string
 }
@@ -28,7 +28,7 @@ export interface Product {
 // Selected item interface
 export interface SelectedItem {
     id: string
-    productId: number
+    productId: string
     productName: string
     productCode?: string
     quantity: number
@@ -52,7 +52,7 @@ export function ProductSelector({
     filterCondition
 }: ProductSelectorProps) {
     const [openProduct, setOpenProduct] = useState(false)
-    const [selectedProduct, setSelectedProduct] = useState<number | null>(null)
+    const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
     const [quantity, setQuantity] = useState<string>("1")
 
     // Filter products based on condition and already selected items

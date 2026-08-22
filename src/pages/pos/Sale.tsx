@@ -10,7 +10,7 @@ import {
     CheckCircle2,
     Loader2
 } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -42,7 +42,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 
 interface Product {
-    id: number
+    id: string
     sku_name: string
     code_name: string
     retail_price: number | null
@@ -51,19 +51,19 @@ interface Product {
 }
 
 interface Customer {
-    id: number
+    id: string
     name: string
     phone: string | null
     balance: number
     has_mou: boolean
     customer_types: {
         name: string
-    }
+    } | null
 }
 
 interface CartItem {
     id: string
-    productId: number
+    productId: string
     skuCode: string
     productName: string
     quantity: number
@@ -94,25 +94,36 @@ export default function Sale() {
         const fetchInitialData = async () => {
             try {
                 // Fetch Products
-                const { data: productsData, error: productsError } = await supabase
-                    .from('products')
-                    .select('id, sku_name, code_name, retail_price, wholesale_price, returnable')
-                    .is('deleted_at', null)
-                    .order('sku_name', { ascending: true })
-
-                if (productsError) throw productsError
-                setProducts(productsData || [])
+                const productsData = await pb.collection('products').getFullList({
+                    filter: 'deleted_at = ""',
+                    sort: 'sku_name',
+                    fields: 'id, sku_name, code_name, retail_price, wholesale_price, returnable'
+                })
+                setProducts(productsData.map((p) => ({
+                    id: p.id,
+                    sku_name: p.sku_name,
+                    code_name: p.code_name,
+                    retail_price: p.retail_price,
+                    wholesale_price: p.wholesale_price,
+                    returnable: p.returnable,
+                })))
                 setLoadingProducts(false)
 
                 // Fetch Customers
-                const { data: customersData, error: customersError } = await supabase
-                    .from('customers')
-                    .select('id, name, phone, balance, has_mou, customer_types(name)')
-                    .is('deleted_at', null)
-                    .order('name', { ascending: true })
-
-                if (customersError) throw customersError
-                setCustomers(customersData as any || [])
+                const customersData = await pb.collection('customers').getFullList({
+                    filter: 'deleted_at = ""',
+                    sort: 'name',
+                    fields: 'id, name, phone, balance, has_mou, type_id',
+                    expand: 'type_id'
+                })
+                setCustomers(customersData.map((c) => ({
+                    id: c.id,
+                    name: c.name,
+                    phone: c.phone,
+                    balance: c.balance,
+                    has_mou: c.has_mou,
+                    customer_types: c.expand?.type_id ?? null
+                })))
                 setLoadingCustomers(false)
 
             } catch (err) {
@@ -208,20 +219,18 @@ export default function Sale() {
                 const totalQuantity = returnableItems.reduce((sum, item) => sum + item.quantity, 0)
 
                 // 1. Insert into empties_log
-                const { data: logData, error: logError } = await supabase
-                    .from('empties_log')
-                    .insert([{
-                        date: new Date().toISOString().split('T')[0],
+                let logData: any
+                try {
+                    logData = await pb.collection('empties_log').create({
+                        date: new Date().toISOString(),
                         customer_id: selectedCustomer.id,
                         activity: 'customer_purchase',
                         total_quantity: totalQuantity
-                    }])
-                    .select()
-                    .single()
-
-                if (logError) {
-                    if (logError.message.includes('Insufficient empties balance')) {
-                        throw new Error(logError.message)
+                    })
+                } catch (logError: any) {
+                    const msg = logError.response?.data?.message || logError.message || ''
+                    if (msg.includes('Insufficient empties balance')) {
+                        throw new Error(msg)
                     }
                     throw logError
                 }
@@ -233,38 +242,24 @@ export default function Sale() {
                     quantity: item.quantity
                 }))
 
-                const { error: detailError } = await supabase
-                    .from('empties_log_detail')
-                    .insert(detailsToInsert)
-
-                if (detailError) throw detailError
+                for (const detail of detailsToInsert) {
+                    await pb.collection('empties_log_detail').create(detail)
+                }
             }
 
             // 3. Record the actual sale in 'orders' and 'sales' tables
             // First, get the order_type_id for 'sale'
-            const { data: orderTypeData, error: orderTypeError } = await supabase
-                .from('order_types')
-                .select('id')
-                .eq('name', 'sale')
-                .single()
-
-            if (orderTypeError) throw orderTypeError
+            const orderTypeData = await pb.collection('order_types').getFirstListItem('name = "sale"', { fields: 'id' })
 
             // Insert into orders header
-            const { data: orderData, error: orderError } = await supabase
-                .from('orders')
-                .insert([{
-                    customer_id: selectedCustomer.id,
-                    total_amount: grandTotal,
-                    payment_type: paymentType,
-                    order_type_id: orderTypeData.id,
-                    status: 'pending',
-                    date_time: new Date().toISOString()
-                }])
-                .select()
-                .single()
-
-            if (orderError) throw orderError
+            const orderData = await pb.collection('orders').create({
+                customer_id: selectedCustomer.id,
+                total_amount: grandTotal,
+                payment_type: paymentType,
+                order_type_id: orderTypeData.id,
+                status: 'pending',
+                date_time: new Date().toISOString()
+            })
 
             // Insert into sales (order items)
             const salesToInsert = cart.map(item => ({
@@ -276,11 +271,9 @@ export default function Sale() {
                 discount: 0
             }))
 
-            const { error: salesError } = await supabase
-                .from('sales')
-                .insert(salesToInsert)
-
-            if (salesError) throw salesError
+            for (const sale of salesToInsert) {
+                await pb.collection('sales').create(sale)
+            }
 
             toast.success(`Order #${orderData.id} created successfully for ${selectedCustomer.name} and is pending approval.`)
             setCart([])

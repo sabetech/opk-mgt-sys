@@ -16,13 +16,13 @@ import {
     TrendingUp,
     Calendar
 } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 
 interface CustomerHistorySheetProps {
     customer: {
-        id: number
+        id: string
         name: string
     } | null
     open: boolean
@@ -56,45 +56,58 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
         setLoading(true)
         try {
             // 1. Fetch Orders
-            const { data: orders, error: ordersError } = await supabase
-                .from('orders')
-                .select(`
-                    id,
-                    date_time,
-                    total_amount,
-                    status,
-                    sales (
-                        quantity,
-                        unit_price,
-                        sub_total,
-                        products (sku_name)
-                    )
-                `)
-                .eq('customer_id', customer.id)
-                .order('date_time', { ascending: false })
+            const orders = await pb.collection('orders').getFullList({
+                filter: `customer_id = "${customer.id}" && deleted_at = ""`,
+                sort: '-date_time',
+                fields: 'id, date_time, total_amount, status'
+            })
 
-            if (ordersError) throw ordersError
+            // 2. Fetch Sales for those orders (with product names)
+            const orderIds = orders.map((o) => o.id)
+            const sales = orderIds.length > 0
+                ? await pb.collection('sales').getFullList({
+                    filter: orderIds.map(id => `order_id = "${id}"`).join(' || '),
+                    expand: 'product_id',
+                })
+                : []
 
-            // 2. Fetch Empties Logs
-            const { data: empties, error: emptiesError } = await supabase
-                .from('empties_log')
-                .select(`
-                    id,
-                    date,
-                    activity,
-                    total_quantity,
-                    created_at,
-                    empties_log_detail (
-                        quantity,
-                        products (sku_name)
-                    )
-                `)
-                .eq('customer_id', customer.id)
-                .order('created_at', { ascending: false })
+            const salesByOrder: Record<string, any[]> = {}
+            for (const sale of sales) {
+                const rel = sale.expand?.product_id
+                const shaped = {
+                    ...sale,
+                    products: rel ? { sku_name: rel.sku_name } : null,
+                }
+                ;(salesByOrder[sale.order_id] = salesByOrder[sale.order_id] || []).push(shaped)
+            }
 
-            if (emptiesError) throw emptiesError
+            // 3. Fetch Empties Logs
+            const empties = await pb.collection('empties_log').getFullList({
+                filter: `customer_id = "${customer.id}"`,
+                sort: '-created',
+                fields: 'id, date, activity, total_quantity, created'
+            })
 
-            // 3. Merge and process
+            // 4. Fetch empties log details (with product names)
+            const logIds = empties.map((log) => log.id)
+            const emptiesDetails = logIds.length > 0
+                ? await pb.collection('empties_log_detail').getFullList({
+                    filter: logIds.map(id => `log_id = "${id}"`).join(' || '),
+                    expand: 'product_id',
+                })
+                : []
+
+            const detailsByLog: Record<string, any[]> = {}
+            for (const detail of emptiesDetails) {
+                const rel = detail.expand?.product_id
+                const shaped = {
+                    ...detail,
+                    products: rel ? { sku_name: rel.sku_name } : null,
+                }
+                ;(detailsByLog[detail.log_id] = detailsByLog[detail.log_id] || []).push(shaped)
+            }
+
+            // 5. Merge and process
             const entries: TimelineEntry[] = []
 
             // Process Orders
@@ -105,9 +118,9 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                     type: 'purchase',
                     description: `Order #${order.id}`,
                     amount: order.total_amount,
-                    quantity: order.sales?.reduce((sum: number, s: any) => sum + s.quantity, 0) || 0,
+                    quantity: salesByOrder[order.id]?.reduce((sum: number, s) => sum + s.quantity, 0) || 0,
                     status: order.status,
-                    details: order.sales || []
+                    details: salesByOrder[order.id] || []
                 })
             })
 
@@ -119,11 +132,11 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                 const isReturn = log.activity === 'customer_empties_return'
                 entries.push({
                     id: `empty-${log.id}`,
-                    date: log.created_at, // Use created_at for time sorting
+                    date: log.created, // Use created for time sorting
                     type: isReturn ? 'return' : 'purchase',
                     description: isReturn ? 'Empties Return' : `Empties for Sale`,
                     quantity: log.total_quantity,
-                    details: log.empties_log_detail || []
+                    details: detailsByLog[log.id] || []
                 })
             })
 
@@ -225,7 +238,7 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                                 <div className="space-y-2">
                                                     {entry.details.map((detail, idx) => (
                                                         <div key={idx} className="flex justify-between items-center text-sm bg-white dark:bg-slate-900 p-2 rounded border border-slate-100 dark:border-slate-800 shadow-sm">
-                                                            <span className="font-medium">{(detail.products as any)?.sku_name}</span>
+                                                            <span className="font-medium">{detail.products?.sku_name}</span>
                                                             <div className="flex items-center gap-4">
                                                                 <span className="text-muted-foreground">Qty: {detail.quantity}</span>
                                                                 {detail.unit_price && (

@@ -11,17 +11,17 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Search, Loader2, Eye, XCircle, CheckCircle } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { format } from "date-fns"
 
 interface Order {
-    id: number
+    id: string
     date_time: string
     total_amount: number
     status: 'pending' | 'approved' | 'cancelled'
-    customer_id: number | null
+    customer_id: string | null
     customers: {
         name: string
     } | null
@@ -39,20 +39,20 @@ export default function Orders() {
     const fetchOrders = async () => {
         setLoading(true)
         try {
-            const { data, error } = await supabase
-                .from('orders')
-                .select(`
-                    id, 
-                    date_time, 
-                    total_amount, 
-                    status, 
-                    customers(name), 
-                    order_types(name)
-                `)
-                .order('date_time', { ascending: false })
-
-            if (error) throw error
-            setOrders(data as any || [])
+            const records = await pb.collection('orders').getFullList({
+                sort: '-date_time',
+                expand: 'customer_id,order_type_id',
+                fields: 'id, date_time, total_amount, status, customer_id, order_type_id'
+            })
+            setOrders(records.map((r) => ({
+                id: r.id,
+                date_time: r.date_time,
+                total_amount: r.total_amount,
+                status: r.status,
+                customer_id: r.customer_id,
+                customers: r.expand?.customer_id ?? null,
+                order_types: r.expand?.order_type_id,
+            })))
         } catch (err) {
             console.error("Error fetching orders:", err)
             toast.error("Failed to load orders.")
@@ -65,16 +65,11 @@ export default function Orders() {
         fetchOrders()
     }, [])
 
-    const handleCancel = async (id: number) => {
+    const handleCancel = async (id: string) => {
         if (!confirm("Are you sure you want to cancel this order?")) return
 
         try {
-            const { error } = await supabase
-                .from('orders')
-                .update({ status: 'cancelled' })
-                .eq('id', id)
-
-            if (error) throw error
+            await pb.collection('orders').update(id, { status: 'cancelled' })
             toast.success("Order cancelled.")
             fetchOrders()
         } catch (err) {

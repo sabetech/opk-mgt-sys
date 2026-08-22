@@ -17,7 +17,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 
 export default function TakeStock() {
     const [date, setDate] = useState<Date | undefined>(new Date())
@@ -40,15 +40,12 @@ export default function TakeStock() {
 
     const fetchProducts = async () => {
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('*')
-                .is('deleted_at', null)
-                .order('sku_name', { ascending: true })
+            const data = await pb.collection('products').getFullList({
+                filter: 'deleted_at = ""',
+                sort: 'sku_name'
+            })
 
-            if (error) throw error
-
-            const transformedProducts: Product[] = (data || []).map(item => ({
+            const transformedProducts: Product[] = data.map((item) => ({
                 id: item.id,
                 name: item.sku_name,
                 code: item.code_name || ''

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import {
     Card,
     CardContent,
@@ -36,7 +36,7 @@ import { format } from "date-fns"
 import { useAuth } from "@/context/AuthContext"
 
 interface OrderDetail {
-    id: number
+    id: string
     date_time: string
     total_amount: number
     amount_tendered: number
@@ -52,13 +52,13 @@ interface OrderDetail {
 }
 
 interface SaleItem {
-    id: number
+    id: string
     quantity: number
     unit_price: number
     sub_total: number
     discount: number
     products: {
-        id: number
+        id: string
         sku_name: string
         code_name: string
     } | null
@@ -80,25 +80,27 @@ export default function OrderDetails() {
             setLoading(true)
             try {
                 // Fetch Order Header
-                const { data: orderData, error: orderError } = await supabase
-                    .from('orders')
-                    .select('*, customers(name, phone), order_types(name)')
-                    .eq('id', id)
-                    .single()
-
-                if (orderError) throw orderError
-                setOrder(orderData as any)
+                const orderData: any = await pb.collection('orders').getOne(id, {
+                    expand: 'customer_id,order_type_id',
+                    fields: 'id, date_time, total_amount, amount_tendered, payment_type, status, customer_id, order_type_id'
+                })
+                setOrder({
+                    ...orderData,
+                    customers: orderData.expand?.customer_id ?? null,
+                    order_types: orderData.expand?.order_type_id,
+                })
                 setAmountTendered(orderData.amount_tendered?.toString() || "")
 
                 // Fetch Sale Items
-                const { data: itemsData, error: itemsError } = await supabase
-                    .from('sales')
-                    .select('*, products(id, sku_name, code_name)')
-                    .eq('order_id', id)
-                    .is('deleted_at', null)
-
-                if (itemsError) throw itemsError
-                setItems(itemsData as any || [])
+                const itemsData: any[] = await pb.collection('sales').getFullList({
+                    filter: `order_id = "${id}" && deleted_at = ""`,
+                    expand: 'product_id',
+                    fields: 'id, quantity, unit_price, sub_total, discount, product_id'
+                })
+                setItems(itemsData.map((r) => ({
+                    ...r,
+                    products: r.expand?.product_id ?? null,
+                })))
 
             } catch (err) {
                 console.error("Error fetching order details:", err)
@@ -123,41 +125,27 @@ export default function OrderDetails() {
         setApproving(true)
         try {
             // 1. Update POS order status
-            const { error: updateError } = await supabase
-                .from('orders')
-                .update({
-                    status: 'approved',
-                    amount_tendered: tendered,
-                    updated_at: new Date().toISOString()
-                })
-                .eq('id', order.id)
-
-            if (updateError) throw updateError
+            await pb.collection('orders').update(order.id, {
+                status: 'approved',
+                amount_tendered: tendered
+            })
 
             // 2. Create Warehouse Order
-            const { data: warehouseOrder, error: warehouseError } = await supabase
-                .from('warehouse_orders')
-                .insert([{
-                    order_id: order.id,
-                    status: 'pending'
-                }])
-                .select()
-                .single()
-
-            if (warehouseError) throw warehouseError
+            const warehouseOrder = await pb.collection('warehouse_orders').create({
+                order_id: order.id,
+                status: 'pending'
+            })
 
             // 3. Create Warehouse Order Items
             const warehouseItemsToInsert = items.map(item => ({
                 warehouse_order_id: warehouseOrder.id,
-                product_id: item.products?.id || null, // Ensure ID is available
+                product_id: item.products?.id || null,
                 quantity: item.quantity
             })).filter(item => item.product_id !== null)
 
-            const { error: itemsError } = await supabase
-                .from('warehouse_order_items')
-                .insert(warehouseItemsToInsert)
-
-            if (itemsError) throw itemsError
+            for (const wItem of warehouseItemsToInsert) {
+                await pb.collection('warehouse_order_items').create(wItem)
+            }
 
             toast.success("Order approved and sent to warehouse!")
             // Refresh local state

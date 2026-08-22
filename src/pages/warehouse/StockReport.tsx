@@ -17,13 +17,13 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 
 // Types
 type StockStatus = 'good' | 'low' | 'out'
 
 type ProductStock = {
-    id: number
+    id: string
     name: string
     code: string
     quantity: number
@@ -43,17 +43,14 @@ export default function StockReport() {
 
     const fetchProducts = async () => {
         try {
-            const { data, error } = await supabase
-                .from('products')
-                .select('*')
-                .is('deleted_at', null)
-                .order('sku_name', { ascending: true })
-
-            if (error) throw error
+            const data = await pb.collection('products').getFullList({
+                filter: 'deleted_at = ""',
+                sort: 'sku_name'
+            })
 
             // Transform and add mock quantities for demonstration
             // In production, you would fetch actual stock quantities from inventory table
-            const transformedProducts: ProductStock[] = (data || []).map(item => {
+            const transformedProducts: ProductStock[] = data.map((item) => {
                 const mockQuantity = Math.floor(Math.random() * 150) // Random quantity for demo
                 return {
                     id: item.id,

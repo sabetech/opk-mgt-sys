@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, ChevronDown, ChevronRight, Package, Loader2, Maximize2 } from "lucide-react"
+import { Calendar as CalendarIcon, ChevronDown, ChevronRight, Package, Loader2, Maximize2, FileText } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -25,7 +25,6 @@ import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import React from "react"
 
-// Types based on DB schema
 interface ProductItem {
     id: string
     qty: number
@@ -47,22 +46,29 @@ interface ReceivableRecord {
     inventory_receivable_items: ProductItem[]
 }
 
-export default function ReceivablesLog() {
-    const [date, setDate] = useState<Date>()
+interface PoSummary {
+    poNumber: string
+    totalQuantity: number
+    pallets: number
+    pcs: number
+    vehicles: string[]
+}
+
+export default function StocksComingInLog() {
+    const [date, setDate] = useState<Date>(new Date())
     const [calendarOpen, setCalendarOpen] = useState(false)
+    const [poFilter, setPoFilter] = useState<string>("")
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
 
-    // Data State
     const [receivables, setReceivables] = useState<ReceivableRecord[]>([])
     const [loading, setLoading] = useState(true)
 
-    // Image Viewer State
     const [viewerImage, setViewerImage] = useState<string | null>(null)
     const [isViewerOpen, setIsViewerOpen] = useState(false)
 
     useEffect(() => {
         fetchReceivables()
-    }, [])
+    }, [date])
 
     const fetchReceivables = async () => {
         setLoading(true)
@@ -105,7 +111,7 @@ export default function ReceivablesLog() {
             setReceivables(shaped)
         } catch (error) {
             console.error('Error fetching receivables:', error)
-            toast.error('Failed to load receivables log')
+            toast.error('Failed to load stocks coming in log')
         } finally {
             setLoading(false)
         }
@@ -126,12 +132,31 @@ export default function ReceivablesLog() {
         setIsViewerOpen(true)
     }
 
-    // Filter logic
-    const filteredData = date
-        ? receivables.filter(item => item.date === format(date, 'yyyy-MM-dd'))
+    const dateFiltered = date
+        ? receivables.filter(item => {
+            const itemDate = new Date(item.date)
+            const selectedDate = new Date(date)
+            return itemDate.toISOString().slice(0, 10) === selectedDate.toISOString().slice(0, 10)
+        })
         : receivables
 
-    const totalProducts = filteredData.reduce((acc, order) => {
+    const poFiltered = poFilter
+        ? dateFiltered.filter(r => r.purchase_order_number === poFilter)
+        : dateFiltered
+
+    const uniquePoNumbers = [...new Set(dateFiltered.map(r => r.purchase_order_number))]
+
+    const poSummaries: PoSummary[] = uniquePoNumbers.map(poNumber => {
+        const poRecords = dateFiltered.filter(r => r.purchase_order_number === poNumber)
+        const totalQuantity = poRecords.reduce((acc, r) =>
+            acc + r.inventory_receivable_items.reduce((pAcc, p) => pAcc + p.qty, 0), 0)
+        const pallets = poRecords.reduce((acc, r) => acc + (r.num_of_pallets || 0), 0)
+        const pcs = poRecords.reduce((acc, r) => acc + (r.num_of_pcs || 0), 0)
+        const vehicles = [...new Set(poRecords.map(r => r.vehicle_no).filter(Boolean))]
+        return { poNumber, totalQuantity, pallets, pcs, vehicles }
+    })
+
+    const totalProducts = dateFiltered.reduce((acc, order) => {
         return acc + order.inventory_receivable_items.reduce((pAcc, p) => pAcc + p.qty, 0)
     }, 0)
 
@@ -147,16 +172,14 @@ export default function ReceivablesLog() {
     return (
         <div className="space-y-6">
             <div className="flex flex-col gap-4">
-                <h2 className="text-3xl font-bold tracking-tight">Receivables Log</h2>
+                <h2 className="text-3xl font-bold tracking-tight">Stocks Coming In Log</h2>
                 <p className="text-muted-foreground">
-                    Track products received from GGBL using Purchase Orders.
+                    View products received from suppliers for the selected date.
                 </p>
             </div>
 
-            {/* Controls & Stats */}
             <div className="flex flex-col gap-4">
-                {/* Date Filter */}
-                <div className="flex justify-start">
+                <div className="flex flex-col sm:flex-row gap-4">
                     <div className="flex flex-col space-y-2">
                         <span className="text-sm font-medium">Filter by Date</span>
                         <div className="flex items-center gap-2">
@@ -185,13 +208,55 @@ export default function ReceivablesLog() {
                                 </PopoverContent>
                             </Popover>
                             {date && (
-                                <Button variant="ghost" onClick={() => setDate(undefined)}>
-                                    Clear
+                                <Button variant="ghost" onClick={() => setDate(new Date())}>
+                                    Today
                                 </Button>
                             )}
                         </div>
                     </div>
+
+                    {uniquePoNumbers.length > 0 && (
+                        <div className="flex flex-col space-y-2">
+                            <span className="text-sm font-medium">Filter by PO Number</span>
+                            <select
+                                value={poFilter}
+                                onChange={(e) => setPoFilter(e.target.value)}
+                                className="flex h-10 w-full sm:w-[280px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <option value="">All Purchase Orders</option>
+                                {uniquePoNumbers.map(po => (
+                                    <option key={po} value={po}>{po}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
                 </div>
+
+                {poSummaries.length > 0 && (
+                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {poSummaries.map((summary) => (
+                            <Card key={summary.poNumber}>
+                                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                                        <FileText className="h-4 w-4 text-muted-foreground" />
+                                        {summary.poNumber}
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="text-2xl font-bold">{summary.totalQuantity}</div>
+                                    <p className="text-xs text-muted-foreground">
+                                        {summary.pallets > 0 && `Pallets: ${summary.pallets}`}
+                                        {summary.pallets > 0 && summary.pcs > 0 && ' · '}
+                                        {summary.pcs > 0 && `PCs: ${summary.pcs}`}
+                                        {summary.vehicles.length > 0 && (
+                                            <span className="block">Vehicle: {summary.vehicles.join(', ')}</span>
+                                        )}
+                                    </p>
+                                </CardContent>
+                            </Card>
+                        ))}
+                    </div>
+                )}
 
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                     <Card>
@@ -204,14 +269,14 @@ export default function ReceivablesLog() {
                         <CardContent>
                             <div className="text-2xl font-bold">{totalProducts}</div>
                             <p className="text-xs text-muted-foreground">
-                                From GGBL {date ? `on ${format(date, 'PPP')}` : '(All Time)'}
+                                {date ? `on ${format(date, 'PPP')}` : '(All Time)'}
+                                {poFilter && ` · PO: ${poFilter}`}
                             </p>
                         </CardContent>
                     </Card>
                 </div>
             </div>
 
-            {/* Table */}
             <div className="rounded-md border bg-white dark:bg-card">
                 <Table>
                     <TableHeader>
@@ -220,13 +285,16 @@ export default function ReceivablesLog() {
                             <TableHead>PO Number</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Received By</TableHead>
+                            <TableHead>Delivered By</TableHead>
+                            <TableHead>Vehicle</TableHead>
                             <TableHead className="text-right">Total Qty</TableHead>
+                            <TableHead className="text-right">Pallets/PCs</TableHead>
                             <TableHead className="text-right">PO Image</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {filteredData.length > 0 ? (
-                            filteredData.map((order) => (
+                        {poFiltered.length > 0 ? (
+                            poFiltered.map((order) => (
                                 <React.Fragment key={order.id}>
                                     <TableRow
                                         className={cn("cursor-pointer hover:bg-muted/50 transition-colors", expandedRows.has(order.id) && "bg-muted/50")}
@@ -238,8 +306,13 @@ export default function ReceivablesLog() {
                                         <TableCell className="font-medium">{order.purchase_order_number}</TableCell>
                                         <TableCell>{format(new Date(order.date), "dd MMM yyyy")}</TableCell>
                                         <TableCell>{order.received_by}</TableCell>
-                                        <TableCell className="text-right">
+                                        <TableCell>{order.delivered_by}</TableCell>
+                                        <TableCell className="font-mono text-sm">{order.vehicle_no}</TableCell>
+                                        <TableCell className="text-right font-medium">
                                             {order.inventory_receivable_items.reduce((acc, p) => acc + p.qty, 0)}
+                                        </TableCell>
+                                        <TableCell className="text-right text-sm">
+                                            {order.num_of_pallets} / {order.num_of_pcs}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {order.purchase_order_img_url ? (
@@ -266,23 +339,8 @@ export default function ReceivablesLog() {
                                     </TableRow>
                                     {expandedRows.has(order.id) && (
                                         <TableRow className="bg-muted/50 hover:bg-muted/50">
-                                            <TableCell colSpan={6} className="p-0">
+                                            <TableCell colSpan={9} className="p-0">
                                                 <div className="p-4 pl-12 bg-muted/30">
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Delivered By:</span>
-                                                            <span className="font-semibold">{order.delivered_by}</span>
-                                                        </div>
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Vehicle Number:</span>
-                                                            <span className="font-semibold">{order.vehicle_no}</span>
-                                                        </div>
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Pallets / PCs:</span>
-                                                            <span className="font-semibold">{order.num_of_pallets} / {order.num_of_pcs}</span>
-                                                        </div>
-                                                    </div>
-
                                                     <h4 className="mb-2 text-sm font-semibold text-muted-foreground">Product Breakdown</h4>
                                                     <div className="rounded-md border bg-background overflow-hidden max-w-2xl">
                                                         <Table>
@@ -310,8 +368,8 @@ export default function ReceivablesLog() {
                             ))
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                                    No records found.
+                                <TableCell colSpan={9} className="h-24 text-center text-muted-foreground">
+                                    {date ? `No records found for ${format(date, 'PPP')}.` : 'No records found.'}
                                 </TableCell>
                             </TableRow>
                         )}
@@ -319,7 +377,6 @@ export default function ReceivablesLog() {
                 </Table>
             </div>
 
-            {/* Image Viewer Dialog */}
             <Dialog open={isViewerOpen} onOpenChange={setIsViewerOpen}>
                 <DialogContent className="max-w-4xl w-[95vw] h-auto max-h-[90vh] p-1 overflow-hidden">
                     <DialogHeader className="sr-only">

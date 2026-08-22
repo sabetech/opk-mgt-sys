@@ -19,15 +19,15 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 
 // Types
 interface Order {
-    id: number
-    order_id: number
+    id: string
+    order_id: string
     status: "pending" | "ready" | "cancelled"
     orders: {
         total_amount: number
@@ -47,27 +47,33 @@ export default function PendingOrders() {
     const [searchTerm, setSearchTerm] = useState("")
     const [currentPage, setCurrentPage] = useState(1)
 
-    // Fetch warehouse orders from Supabase
+    // Fetch warehouse orders from PocketBase
     const fetchOrders = async () => {
         setLoading(true)
         try {
-            const { data, error } = await supabase
-                .from('warehouse_orders')
-                .select(`
-                    id, 
-                    order_id,
-                    status, 
-                    orders(
-                        total_amount,
-                        date_time,
-                        customers(name)
-                    )
-                `)
-                .eq('status', 'pending')
-                .order('created_at', { ascending: false })
+            const data = await pb.collection('warehouse_orders').getFullList({
+                filter: 'status = "pending"',
+                sort: '-created',
+                expand: 'order_id.customer_id',
+                fields: 'id, order_id, status'
+            })
 
-            if (error) throw error
-            setOrders(data as any || [])
+            const shaped = data.map((w) => {
+                const order = w.expand?.order_id ?? null
+                return {
+                    id: w.id,
+                    order_id: w.order_id,
+                    status: w.status,
+                    orders: order
+                        ? {
+                            total_amount: order.total_amount,
+                            date_time: order.date_time,
+                            customers: order.expand?.customer_id ?? null,
+                        }
+                        : null,
+                }
+            })
+            setOrders(shaped)
         } catch (err) {
             console.error("Error fetching pending warehouse orders:", err)
             toast.error("Failed to load pending warehouse orders")
@@ -94,14 +100,9 @@ export default function PendingOrders() {
     const paginatedOrders = filteredOrders.slice(startIndex, endIndex)
 
     // Handle approve order (mark as ready for fulfilment)
-    const handleApproveOrder = async (orderId: number) => {
+    const handleApproveOrder = async (orderId: string) => {
         try {
-            const { error } = await supabase
-                .from('warehouse_orders')
-                .update({ status: 'ready' })
-                .eq('id', orderId)
-
-            if (error) throw error
+            await pb.collection('warehouse_orders').update(orderId, { status: 'ready' })
             toast.success("Order marked as ready for fulfilment!")
             fetchOrders()
         } catch (err) {
@@ -111,7 +112,7 @@ export default function PendingOrders() {
     }
 
     // Handle cancel order (revert sale)
-    const handleCancelOrder = async (warehouseOrderId: number, posOrderId: number) => {
+    const handleCancelOrder = async (warehouseOrderId: string, posOrderId: string) => {
         const confirmed = confirm(
             "ARE YOU SURE? Cancelling this warehouse order will REVERT the entire POS sale. The customer must be refunded."
         )
@@ -119,20 +120,10 @@ export default function PendingOrders() {
         if (confirmed) {
             try {
                 // 1. Cancel Warehouse Order
-                const { error: whError } = await supabase
-                    .from('warehouse_orders')
-                    .update({ status: 'cancelled' })
-                    .eq('id', warehouseOrderId)
-
-                if (whError) throw whError
+                await pb.collection('warehouse_orders').update(warehouseOrderId, { status: 'cancelled' })
 
                 // 2. Cancel POS Order (Revert Sale)
-                const { error: posError } = await supabase
-                    .from('orders')
-                    .update({ status: 'cancelled' })
-                    .eq('id', posOrderId)
-
-                if (posError) throw posError
+                await pb.collection('orders').update(posOrderId, { status: 'cancelled' })
 
                 toast.success("Sale reverted and warehouse order cancelled.")
                 fetchOrders()

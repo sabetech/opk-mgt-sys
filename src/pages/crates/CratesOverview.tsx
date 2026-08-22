@@ -9,10 +9,10 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 
 interface Product {
-    id: number
+    id: string
     sku_name: string
     code_name: string
     full_quantity: number
@@ -44,28 +44,35 @@ export default function CratesOverview() {
     useEffect(() => {
         async function fetchCrateData() {
             try {
-                // Fetch products with their stock and empties data
-                const { data, error } = await supabase
-                    .from('products')
-                    .select(`
-                        id, 
-                        sku_name, 
-                        code_name,
-                        warehouse_stock (quantity),
-                        empties (quantity_on_ground)
-                    `)
-                    .eq('returnable', true)
-                    .order('sku_name')
+                // Fetch returnable products
+                const productsData = await pb.collection('products').getFullList({
+                    filter: 'returnable = true',
+                    sort: 'sku_name',
+                    fields: 'id, sku_name, code_name'
+                })
 
-                if (error) throw error
+                const productIds = productsData.map((p) => p.id)
 
-                if (data) {
-                    const mappedProducts: Product[] = data.map((item: any) => ({
+                // Fetch warehouse stock and empties for those products
+                const stockData = productIds.length > 0
+                    ? await pb.collection('warehouse_stock').getFullList({ filter: `product_id in ("${productIds.join('","')}")` })
+                    : []
+                const emptiesData = productIds.length > 0
+                    ? await pb.collection('empties').getFullList({ filter: `product_id in ("${productIds.join('","')}")` })
+                    : []
+
+                const stockByProduct: Record<string, number> = {}
+                for (const s of stockData) stockByProduct[s.product_id] = s.quantity || 0
+                const emptiesByProduct: Record<string, number> = {}
+                for (const e of emptiesData) emptiesByProduct[e.product_id] = e.quantity_on_ground || 0
+
+                if (productsData) {
+                    const mappedProducts: Product[] = productsData.map((item) => ({
                         id: item.id,
                         sku_name: item.sku_name,
                         code_name: item.code_name,
-                        full_quantity: item.warehouse_stock?.[0]?.quantity || 0,
-                        empty_quantity: item.empties?.[0]?.quantity_on_ground || 0
+                        full_quantity: stockByProduct[item.id] || 0,
+                        empty_quantity: emptiesByProduct[item.id] || 0
                     }))
                     setProducts(mappedProducts)
                 }

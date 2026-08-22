@@ -1,19 +1,19 @@
 export type OrderStatus = 'pending' | 'approved' | 'cancelled';
 
 export interface OrderType {
-    id: number;
+    id: string;
     name: 'sale' | 'vse' | 'promo' | 'protocol';
     created_at: string;
 }
 
 export interface Order {
-    id: number;
-    customer_id: number | null;
+    id: string;
+    customer_id: string | null;
     total_amount: number;
     amount_tendered: number;
     payment_type: string | null;
     transaction_id: string | null;
-    order_type_id: number;
+    order_type_id: string;
     date_time: string;
     status: OrderStatus;
     user_id: string | null;
@@ -23,9 +23,9 @@ export interface Order {
 }
 
 export interface Sale {
-    id: number;
-    order_id: number;
-    product_id: number;
+    id: string;
+    order_id: string;
+    product_id: string;
     discount: number;
     quantity: number;
     unit_price: number;

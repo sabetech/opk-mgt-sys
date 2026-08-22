@@ -1,8 +1,6 @@
 import { useState, useEffect } from "react"
-import { Trash2, CalendarIcon } from "lucide-react"
-
+import { Trash2, CalendarIcon, Loader2, Save } from "lucide-react"
 import { cn } from "@/lib/utils"
-
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -17,22 +15,31 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 
-export default function ReturnCrates() {
+const generateReloadId = () => {
+    const now = new Date()
+    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
+    const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+    return `RLD-${dateStr}-${randomSuffix}`
+}
+
+export default function ReloadTruckEmpties() {
     const [date, setDate] = useState<Date>()
     const [calendarOpen, setCalendarOpen] = useState(false)
-    const [vehicleNumber, setVehicleNumber] = useState("")
-    const [returnedBy, setReturnedBy] = useState("")
+    const [driverCarNumber, setDriverCarNumber] = useState("")
+    const [driverName, setDriverName] = useState("")
     const [numberOfPallets, setNumberOfPallets] = useState("")
-    const [numberOfPCs, setNumberOfPCs] = useState("")
+    const [referenceId, setReferenceId] = useState<string>(generateReloadId())
 
     // Product selection
     const [products, setProducts] = useState<Product[]>([])
     const [returnItems, setReturnItems] = useState<SelectedItem[]>([])
+    const [loading, setLoading] = useState(true)
+    const [saving, setSaving] = useState(false)
 
     useEffect(() => {
         async function fetchProducts() {
@@ -50,6 +57,9 @@ export default function ReturnCrates() {
                 setProducts(transformedProducts)
             } catch (error) {
                 console.error("Error fetching products:", error)
+                toast.error("Failed to load returnable products")
+            } finally {
+                setLoading(false)
             }
         }
         fetchProducts()
@@ -62,8 +72,8 @@ export default function ReturnCrates() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
 
-        if (!date || !vehicleNumber || !returnedBy || returnItems.length === 0) {
-            toast.error("Please fill in all required fields (Date, Vehicle Number, Returned By, and at least one product).")
+        if (!date || !driverCarNumber || !driverName || returnItems.length === 0) {
+            toast.error("Please fill in all required fields (Date, Driver's Car Number, Driver's Name, and at least one product).")
             return
         }
 
@@ -75,10 +85,10 @@ export default function ReturnCrates() {
                 date: date.toISOString().split('T')[0],
                 total_quantity: totalQuantity,
                 activity: 'empties_to_supplier',
-                vehicle_no: vehicleNumber,
-                returned_by: returnedBy,
+                vehicle_no: driverCarNumber,
+                returned_by: driverName,
                 num_of_pallets: numberOfPallets ? parseInt(numberOfPallets) : 0,
-                num_of_pcs: numberOfPCs ? parseInt(numberOfPCs) : 0
+                num_of_pcs: 0
             })
 
             // 2. Insert into empties_log_detail
@@ -90,34 +100,55 @@ export default function ReturnCrates() {
                 })
             }
 
-            toast.success("Crate return to supplier recorded successfully!")
+            toast.success("Truck reloaded with empties recorded successfully!")
 
             // Reset form
             setDate(undefined)
-            setVehicleNumber("")
-            setReturnedBy("")
+            setDriverCarNumber("")
+            setDriverName("")
             setNumberOfPallets("")
-            setNumberOfPCs("")
+            setReferenceId(generateReloadId())
             setReturnItems([])
         } catch (error: any) {
-            console.error("Error saving return:", error)
-            toast.error(error.message || "Failed to record return.")
+            console.error("Error saving reload:", error)
+            toast.error(error.message || "Failed to record reload.")
+        } finally {
+            setSaving(false)
         }
+    }
+
+    if (loading) {
+        return (
+            <div className="space-y-6">
+                <div>
+                    <h2 className="text-3xl font-bold tracking-tight">Reload Truck with Empties</h2>
+                    <p className="text-muted-foreground">
+                        Record empty crates being sent back to Guinness Ghana
+                    </p>
+                </div>
+                <div className="flex items-center justify-center h-64">
+                    <div className="flex flex-col items-center gap-2">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                        <p>Loading returnable products...</p>
+                    </div>
+                </div>
+            </div>
+        )
     }
 
     return (
         <div className="space-y-6">
             <div>
-                <h2 className="text-3xl font-bold tracking-tight">Return Crates</h2>
+                <h2 className="text-3xl font-bold tracking-tight">Reload Truck with Empties</h2>
                 <p className="text-muted-foreground">
-                    Record crates being returned to Guinness Ghana
+                    Record empty crates being sent back to Guinness Ghana
                 </p>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Return Details</CardTitle>
+                        <CardTitle>Reload Details</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="grid gap-4 md:grid-cols-2">
@@ -150,31 +181,42 @@ export default function ReturnCrates() {
                                 </Popover>
                             </div>
 
-                            {/* Vehicle Number */}
+                            {/* Reference ID (auto-generated, readonly) */}
                             <div className="space-y-2">
-                                <Label htmlFor="vehicleNumber">Vehicle Number <span className="text-red-500">*</span></Label>
+                                <Label htmlFor="referenceId">Reference #</Label>
                                 <Input
-                                    id="vehicleNumber"
+                                    id="referenceId"
+                                    value={referenceId}
+                                    readOnly
+                                    className="bg-muted"
+                                />
+                            </div>
+
+                            {/* Driver's Car Number */}
+                            <div className="space-y-2">
+                                <Label htmlFor="driverCarNumber">Driver's Car Number <span className="text-red-500">*</span></Label>
+                                <Input
+                                    id="driverCarNumber"
                                     placeholder="e.g., GH-1234-22"
-                                    value={vehicleNumber}
-                                    onChange={(e) => setVehicleNumber(e.target.value)}
+                                    value={driverCarNumber}
+                                    onChange={(e) => setDriverCarNumber(e.target.value)}
                                 />
                             </div>
 
-                            {/* Returned By */}
+                            {/* Driver's Name */}
                             <div className="space-y-2">
-                                <Label htmlFor="returnedBy">Returned By <span className="text-red-500">*</span></Label>
+                                <Label htmlFor="driverName">Driver's Name <span className="text-red-500">*</span></Label>
                                 <Input
-                                    id="returnedBy"
-                                    placeholder="Name of person returning"
-                                    value={returnedBy}
-                                    onChange={(e) => setReturnedBy(e.target.value)}
+                                    id="driverName"
+                                    placeholder="Name of driver"
+                                    value={driverName}
+                                    onChange={(e) => setDriverName(e.target.value)}
                                 />
                             </div>
 
-                            {/* Number of Pallets */}
+                            {/* Pallets */}
                             <div className="space-y-2">
-                                <Label htmlFor="pallets">Number of Pallets</Label>
+                                <Label htmlFor="pallets">Pallets</Label>
                                 <Input
                                     id="pallets"
                                     type="number"
@@ -184,19 +226,6 @@ export default function ReturnCrates() {
                                     onChange={(e) => setNumberOfPallets(e.target.value)}
                                 />
                             </div>
-
-                            {/* Number of PCs */}
-                            <div className="space-y-2">
-                                <Label htmlFor="pcs">Number of PCs</Label>
-                                <Input
-                                    id="pcs"
-                                    type="number"
-                                    min="0"
-                                    placeholder="0"
-                                    value={numberOfPCs}
-                                    onChange={(e) => setNumberOfPCs(e.target.value)}
-                                />
-                            </div>
                         </div>
                     </CardContent>
                 </Card>
@@ -204,15 +233,20 @@ export default function ReturnCrates() {
                 {/* Products Section */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Products to Return</CardTitle>
+                        <CardTitle>Products & Quantity</CardTitle>
+                        <CardDescription>
+                            Select returnable products to reload
+                        </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <ProductSelector
-                            products={products}
-                            selectedItems={returnItems}
-                            onItemsChange={setReturnItems}
-                            quantityLabel="Quantity"
-                        />
+                        {!saving && (
+                            <ProductSelector
+                                products={products}
+                                selectedItems={returnItems}
+                                onItemsChange={setReturnItems}
+                                quantityLabel="Quantity"
+                            />
+                        )}
 
                         {/* Items List */}
                         <div className="rounded-md border bg-white dark:bg-card">
@@ -237,6 +271,7 @@ export default function ReturnCrates() {
                                                         size="icon"
                                                         className="text-red-500 hover:text-red-700 hover:bg-red-50"
                                                         onClick={() => handleRemoveItem(item.id)}
+                                                        disabled={saving}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
@@ -257,8 +292,9 @@ export default function ReturnCrates() {
                 </Card>
 
                 <div className="flex justify-end">
-                    <Button type="submit" size="lg" disabled={returnItems.length === 0}>
-                        Submit Return
+                    <Button type="submit" size="lg" disabled={saving || returnItems.length === 0}>
+                        {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                        {saving ? "Recording..." : "Record Reload"}
                     </Button>
                 </div>
             </form>

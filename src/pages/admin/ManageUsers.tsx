@@ -50,7 +50,7 @@ import {
     Search,
     Edit2
 } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { pb } from '@/lib/pocketbase';
 import { useAuth, type UserRole, type Profile } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -77,16 +77,16 @@ export default function ManageUsers() {
     const fetchProfiles = async () => {
         setLoading(true);
         try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .order('created_at', { ascending: false });
-
-            if (error) throw error;
-            setProfiles(data || []);
+            const records = await pb.collection('users').getFullList({ sort: '-created' });
+            setProfiles(records.map((r) => ({
+                id: r.id,
+                full_name: r.name ?? null,
+                role: r.role,
+                created_at: r.created,
+            })));
         } catch (error: any) {
             console.error('Error fetching profiles:', error);
-            toast.error(error.message || 'Failed to load users');
+            toast.error(error.response?.data?.message || error.message || 'Failed to load users');
         } finally {
             setLoading(false);
         }
@@ -108,22 +108,17 @@ export default function ManageUsers() {
 
         setUpdating(true);
         try {
-            const { error } = await supabase
-                .from('profiles')
-                .update({
-                    role: newRole,
-                    full_name: newName
-                })
-                .eq('id', editingProfile.id);
-
-            if (error) throw error;
+            await pb.collection('users').update(editingProfile.id, {
+                role: newRole,
+                name: newName
+            });
 
             toast.success(`User ${newName || 'profile'} updated successfully`);
             setIsEditDialogOpen(false);
             fetchProfiles();
         } catch (error: any) {
             console.error('Error updating profile:', error);
-            toast.error(error.message || 'Failed to update profile');
+            toast.error(error.response?.data?.message || error.message || 'Failed to update profile');
         } finally {
             setUpdating(false);
         }

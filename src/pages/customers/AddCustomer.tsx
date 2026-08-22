@@ -20,7 +20,7 @@ import {
     DialogTrigger,
 } from "@/components/ui/dialog"
 import { FileSpreadsheet, Save, Upload, Loader2, CheckCircle2 } from "lucide-react"
-import { supabase } from "@/lib/supabase"
+import { pb } from "@/lib/pocketbase"
 import type { CustomerType, CustomerForm } from "@/lib/customerTypes"
 import Papa from "papaparse"
 import { cn } from "@/lib/utils"
@@ -49,13 +49,8 @@ export default function AddCustomer() {
     useEffect(() => {
         const fetchTypes = async () => {
             try {
-                const { data, error } = await supabase
-                    .from('customer_types')
-                    .select('*')
-                    .order('name', { ascending: true })
-
-                if (error) throw error
-                setCustomerTypes(data || [])
+                const data = await pb.collection('customer_types').getFullList({ sort: 'name' })
+                setCustomerTypes(data.map((t) => ({ id: t.id, name: t.name })))
             } catch (err) {
                 console.error("Error fetching customer types:", err)
             } finally {
@@ -131,11 +126,9 @@ export default function AddCustomer() {
                         return
                     }
 
-                    const { error } = await supabase
-                        .from('customers')
-                        .insert(customersToInsert)
-
-                    if (error) throw error
+                    for (const customer of customersToInsert) {
+                        await pb.collection('customers').create(customer)
+                    }
 
                     toast.success(`Successfully imported ${customersToInsert.length} customers!`)
                     setIsDialogOpen(false)
@@ -170,17 +163,13 @@ export default function AddCustomer() {
 
         setLoading(true)
         try {
-            const { error } = await supabase
-                .from('customers')
-                .insert([{
-                    name: formData.name,
-                    phone: formData.phone || null,
-                    type_id: parseInt(formData.type_id),
-                    balance: formData.balance || 0,
-                    has_mou: formData.has_mou
-                }])
-
-            if (error) throw error
+            await pb.collection('customers').create({
+                name: formData.name,
+                phone: formData.phone || null,
+                type_id: formData.type_id,
+                balance: formData.balance || 0,
+                has_mou: formData.has_mou
+            })
 
             toast.success("Customer saved successfully!")
             // Redirect to list page
