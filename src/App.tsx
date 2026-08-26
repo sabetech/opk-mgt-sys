@@ -92,30 +92,30 @@ function App() {
                 <Route path="pending-orders" element={<PendingOrders />} />
                 <Route path="completed-orders" element={<CompletedOrders />} />
                 <Route path="adjust-stock" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                  <ProtectedRoute allowedRoles={['admin']}>
                     <PlaceholderPage title="Adjust Stock" />
                   </ProtectedRoute>
                 } />
                 <Route path="record-receivable" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                  <ProtectedRoute allowedRoles={['admin']}>
                     <RecordReceivable />
                   </ProtectedRoute>
                 } />
                 <Route path="receivables-log" element={<ReceivablesLog />} />
                 <Route path="inventory-log" element={<InventoryLog />} />
                 <Route path="add-loadout" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                  <ProtectedRoute allowedRoles={['admin']}>
                     <AddLoadout />
                   </ProtectedRoute>
                 } />
                 <Route path="loadout" element={<Loadout />} />
                 <Route path="take-stock" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                  <ProtectedRoute allowedRoles={['admin']}>
                     <TakeStock />
                   </ProtectedRoute>
                 } />
                 <Route path="breakages" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                  <ProtectedRoute allowedRoles={['admin']}>
                     <Breakages />
                   </ProtectedRoute>
                 } />
