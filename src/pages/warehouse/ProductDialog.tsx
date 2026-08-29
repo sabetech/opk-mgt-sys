@@ -30,6 +30,7 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
     const [formData, setFormData] = useState<ProductForm>({
         sku_name: '',
         code_name: '',
+        ex_factory_price: '',
         wholesale_price: '',
         retail_price: '',
         returnable: false
@@ -43,6 +44,7 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                 setFormData({
                     sku_name: editingProduct.sku_name,
                     code_name: editingProduct.code_name || '',
+                    ex_factory_price: editingProduct.ex_factory_price?.toString() || '',
                     wholesale_price: editingProduct.wholesale_price?.toString() || '',
                     retail_price: editingProduct.retail_price?.toString() || '',
                     returnable: editingProduct.returnable
@@ -51,6 +53,7 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                 setFormData({
                     sku_name: '',
                     code_name: '',
+                    ex_factory_price: '',
                     wholesale_price: '',
                     retail_price: '',
                     returnable: false
@@ -116,6 +119,21 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                             placeholder="Enter SKU code (optional)"
                         />
                         {errors.code_name && <p className="text-sm text-red-500">{errors.code_name}</p>}
+                    </div>
+                    
+                    <div className="grid gap-2">
+                        <Label htmlFor="ex_factory_price">Ex Factory Price (GHc)</Label>
+                        <Input
+                            id="ex_factory_price"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={formData.ex_factory_price}
+                            onChange={(e) => handleInputChange('ex_factory_price', e.target.value)}
+                            className={errors.ex_factory_price ? 'border-red-500' : ''}
+                            placeholder="0.00"
+                        />
+                        {errors.ex_factory_price && <p className="text-sm text-red-500">{errors.ex_factory_price}</p>}
                     </div>
                     
                     <div className="grid gap-2">

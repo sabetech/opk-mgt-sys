@@ -114,6 +114,8 @@ export function AppSidebar({ className }: SidebarProps) {
             children: [
                 { title: "Sale", href: "/dashboard/pos/sale", roles: ["admin", "sales_manager"] },
                 { title: "Orders", href: "/dashboard/pos/orders", roles: ["admin", "cashier", "auditor"] },
+                { title: "Add Customer", href: "/dashboard/customers/add", roles: ["admin", "sales_manager", "cashier", "auditor"] },
+                { title: "Manage Products", href: "/dashboard/pos/manage-products", roles: ["admin"] },
             ],
         },
         {
@@ -132,6 +134,7 @@ export function AppSidebar({ className }: SidebarProps) {
             roles: ["admin"],
             children: [
                 { title: "Add User", href: "/dashboard/admin/add-user", roles: ["admin"] },
+                { title: "Settings", href: "/dashboard/admin/settings", roles: ["admin"] },
             ],
         },
     ]

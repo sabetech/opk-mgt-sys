@@ -47,6 +47,7 @@ export default function Products() {
                 id: product.id,
                 sku_name: product.sku_name,
                 code_name: product.code_name,
+                ex_factory_price: product.ex_factory_price,
                 wholesale_price: product.wholesale_price,
                 retail_price: product.retail_price,
                 returnable: product.returnable,
@@ -99,6 +100,7 @@ export default function Products() {
                 await pb.collection('products').update(editingProduct.id, {
                     sku_name: formData.sku_name,
                     code_name: formData.code_name || null,
+                    ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
                     returnable: formData.returnable
@@ -107,7 +109,7 @@ export default function Products() {
                 // Update local state
                 setProducts(prev => prev.map(p =>
                     p.id === editingProduct.id
-                        ? { ...p, ...formData, wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null, retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null }
+                        ? { ...p, ...formData, ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null, wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null, retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null }
                         : p
                 ))
 
@@ -117,6 +119,7 @@ export default function Products() {
                 const data = await pb.collection('products').create({
                     sku_name: formData.sku_name,
                     code_name: formData.code_name || null,
+                    ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
                     returnable: formData.returnable
@@ -127,6 +130,7 @@ export default function Products() {
                     id: data.id,
                     sku_name: formData.sku_name,
                     code_name: formData.code_name || null,
+                    ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
                     returnable: formData.returnable,

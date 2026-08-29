@@ -24,11 +24,13 @@ import StockReport from "@/pages/warehouse/StockReport"
 import Sale from "@/pages/pos/Sale"
 import Orders from "@/pages/pos/Orders"
 import OrderDetails from "@/pages/pos/OrderDetails"
+import ManageProducts from "@/pages/pos/ManageProducts"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/context/AuthContext"
 import { Toaster } from "sonner"
 import AddUser from "@/pages/admin/AddUser"
 import ManageUsers from "@/pages/admin/ManageUsers"
+import Settings from "@/pages/admin/Settings"
 import StocksComingIn from "@/pages/operations/StocksComingIn"
 import StocksComingInLog from "@/pages/operations/StocksComingInLog"
 import Adjustments from "@/pages/operations/Adjustments"
@@ -180,6 +182,11 @@ function App() {
                   </ProtectedRoute>
                 } />
                 <Route path="orders/:id" element={<OrderDetails />} />
+                <Route path="manage-products" element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <ManageProducts />
+                  </ProtectedRoute>
+                } />
               </Route>
 
               {/* Reports */}
@@ -196,6 +203,7 @@ function App() {
               }>
                 <Route path="manage-users" element={<ManageUsers />} />
                 <Route path="add-user" element={<AddUser />} />
+                <Route path="settings" element={<Settings />} />
               </Route>
             </Route>
           </Routes>

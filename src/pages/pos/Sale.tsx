@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { useNavigate } from "react-router-dom"
 import {
     Search,
     ShoppingCart,
@@ -40,6 +41,9 @@ import {
     CommandList,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Checkbox } from "@/components/ui/checkbox"
+import CustomerFormFields from "@/components/CustomerFormFields"
 
 interface Product {
     id: string
@@ -68,10 +72,12 @@ interface CartItem {
     productName: string
     quantity: number
     price: number
+    surcharge: number
     total: number
 }
 
 export default function Sale() {
+    const navigate = useNavigate()
     // State
     const [products, setProducts] = useState<Product[]>([])
     const [customers, setCustomers] = useState<Customer[]>([])
@@ -88,6 +94,34 @@ export default function Sale() {
     // UI helpers
     const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false)
     const [productPopoverOpen, setProductPopoverOpen] = useState(false)
+    const [addCustomerOpen, setAddCustomerOpen] = useState(false)
+
+    // Wholesale surcharge
+    const [surchargeConfig, setSurchargeConfig] = useState<{ amount: number; product_ids: string[] }>({ amount: 0, product_ids: [] })
+    const [applySurcharge, setApplySurcharge] = useState(false)
+
+    // Fetch customers (reusable for refresh after add)
+    const fetchCustomers = async () => {
+        try {
+            const customersData = await pb.collection('customers').getFullList({
+                filter: 'deleted_at = ""',
+                sort: 'name',
+                expand: 'type_id'
+            })
+            setCustomers(customersData.map((c) => ({
+                id: c.id,
+                name: c.name,
+                phone: c.phone,
+                balance: c.balance,
+                has_mou: c.has_mou,
+                customer_types: c.expand?.type_id ?? null
+            })))
+        } catch (err) {
+            console.error("Error fetching customers:", err)
+        } finally {
+            setLoadingCustomers(false)
+        }
+    }
 
     // Fetch Data
     useEffect(() => {
@@ -110,21 +144,16 @@ export default function Sale() {
                 setLoadingProducts(false)
 
                 // Fetch Customers
-                const customersData = await pb.collection('customers').getFullList({
-                    filter: 'deleted_at = ""',
-                    sort: 'name',
-                    fields: 'id, name, phone, balance, has_mou, type_id',
-                    expand: 'type_id'
-                })
-                setCustomers(customersData.map((c) => ({
-                    id: c.id,
-                    name: c.name,
-                    phone: c.phone,
-                    balance: c.balance,
-                    has_mou: c.has_mou,
-                    customer_types: c.expand?.type_id ?? null
-                })))
-                setLoadingCustomers(false)
+                await fetchCustomers()
+
+                // Fetch wholesale surcharge settings
+                try {
+                    const surchargeRecord = await pb.collection('app_settings').getFirstListItem('key = "wholesale_surcharge"')
+                    const raw = surchargeRecord.value
+                    setSurchargeConfig(typeof raw === 'string' ? JSON.parse(raw) : raw)
+                } catch (err) {
+                    console.error("Failed to load surcharge settings:", err)
+                }
 
             } catch (err) {
                 console.error("Error fetching initial data:", err)
@@ -133,6 +162,11 @@ export default function Sale() {
         fetchInitialData()
     }, [])
 
+    // Reset surcharge when product or customer changes
+    useEffect(() => {
+        setApplySurcharge(false)
+    }, [selectedProduct, selectedCustomer])
+
     const getUnitPrice = (product: Product) => {
         if (!selectedCustomer) return product.retail_price || 0
         return selectedCustomer.customer_types?.name === "Wholesaler"
@@ -140,8 +174,14 @@ export default function Sale() {
             : product.retail_price || 0
     }
 
+    // Check if wholesale surcharge applies to current selection
+    const isSurchargeApplicable = selectedCustomer?.customer_types?.name === "Wholesaler" &&
+        surchargeConfig.product_ids.includes(selectedProduct?.id || "") &&
+        surchargeConfig.amount > 0
+
     const currentUnitPrice = selectedProduct ? getUnitPrice(selectedProduct) : 0
-    const currentTotalPrice = currentUnitPrice * quantity
+    const currentSurcharge = (applySurcharge && isSurchargeApplicable) ? surchargeConfig.amount : 0
+    const currentTotalPrice = (currentUnitPrice + currentSurcharge) * quantity
 
     const handleAddToCart = () => {
         if (!selectedProduct || quantity <= 0) return
@@ -153,7 +193,7 @@ export default function Sale() {
                     ? {
                         ...item,
                         quantity: item.quantity + quantity,
-                        total: (item.quantity + quantity) * item.price
+                        total: (item.quantity + quantity) * (item.price + item.surcharge)
                     }
                     : item
             ))
@@ -165,14 +205,16 @@ export default function Sale() {
                 productName: selectedProduct.sku_name,
                 quantity: quantity,
                 price: currentUnitPrice,
+                surcharge: currentSurcharge,
                 total: currentTotalPrice
             }
             setCart([...cart, newItem])
         }
 
-        // Reset product selection
+        // Reset product selection and surcharge
         setSelectedProduct(null)
         setQuantity(1)
+        setApplySurcharge(false)
     }
 
     const removeFromCart = (id: string) => {
@@ -332,7 +374,22 @@ export default function Sale() {
                                             <Command>
                                                 <CommandInput placeholder="Search customer..." />
                                                 <CommandList>
-                                                    <CommandEmpty>No customer found.</CommandEmpty>
+                                                    <CommandEmpty>
+                                                        <div className="flex flex-col items-center gap-2 py-2">
+                                                            <p className="text-sm text-muted-foreground">No customer found.</p>
+                                                            <Button
+                                                                variant="link"
+                                                                size="sm"
+                                                                className="h-auto p-0"
+                                                                onClick={() => {
+                                                                    setCustomerPopoverOpen(false)
+                                                                    setAddCustomerOpen(true)
+                                                                }}
+                                                            >
+                                                                + Add New Customer
+                                                            </Button>
+                                                        </div>
+                                                    </CommandEmpty>
                                                     <CommandGroup>
                                                         {customers.map((c) => (
                                                             <CommandItem
@@ -426,9 +483,27 @@ export default function Sale() {
                                         />
                                     </div>
 
+                                    {isSurchargeApplicable && (
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="surcharge"
+                                                checked={applySurcharge}
+                                                onCheckedChange={(checked) => setApplySurcharge(checked === true)}
+                                            />
+                                            <label
+                                                htmlFor="surcharge"
+                                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                            >
+                                                Apply GH₵ {surchargeConfig.amount.toFixed(2)} additional charge
+                                            </label>
+                                        </div>
+                                    )}
+
                                     <div className="space-y-1 bg-amber-50 dark:bg-amber-900/20 px-3 py-1 rounded border border-amber-200 dark:border-amber-800">
                                         <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase">Item Total</span>
-                                        <div className="text-lg font-bold text-amber-800 dark:text-amber-300">GH₵ {currentTotalPrice.toFixed(2)}</div>
+                                        <div className="text-lg font-bold text-amber-800 dark:text-amber-300">
+                                            GH₵ {currentTotalPrice.toFixed(2)}
+                                        </div>
                                     </div>
 
                                     <Button onClick={handleAddToCart} className="h-9 bg-amber-700 hover:bg-amber-800">
@@ -467,7 +542,12 @@ export default function Sale() {
                                                 <TableRow key={item.id}>
                                                     <TableCell className="font-mono text-xs">{item.skuCode}</TableCell>
                                                     <TableCell className="font-medium">{item.productName}</TableCell>
-                                                    <TableCell className="text-right">GH₵ {item.price.toFixed(2)}</TableCell>
+                                                    <TableCell className="text-right">
+                                                        GH₵ {item.price.toFixed(2)}
+                                                        {item.surcharge > 0 && (
+                                                            <span className="text-muted-foreground"> + GH₵ {item.surcharge.toFixed(2)}</span>
+                                                        )}
+                                                    </TableCell>
                                                     <TableCell className="text-center">{item.quantity}</TableCell>
                                                     <TableCell className="text-right font-bold">GH₵ {item.total.toFixed(2)}</TableCell>
                                                     <TableCell>
@@ -606,6 +686,29 @@ export default function Sale() {
                     </div>
                 </div>
             </div>
+
+            {/* Add Customer Dialog */}
+            <Dialog open={addCustomerOpen} onOpenChange={setAddCustomerOpen}>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Add Customer</DialogTitle>
+                    </DialogHeader>
+                    <CustomerFormFields
+                        onSuccess={(newCustomer) => {
+                            fetchCustomers()
+                            setSelectedCustomer({
+                                id: newCustomer.id,
+                                name: newCustomer.name,
+                                phone: null,
+                                balance: 0,
+                                has_mou: false,
+                                customer_types: null,
+                            })
+                            setAddCustomerOpen(false)
+                        }}
+                    />
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

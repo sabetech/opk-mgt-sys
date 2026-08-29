@@ -2,6 +2,7 @@ export interface Product {
   id: string
   sku_name: string
   code_name: string | null
+  ex_factory_price: number | null
   wholesale_price: number | null
   retail_price: number | null
   returnable: boolean
@@ -13,6 +14,7 @@ export interface Product {
 export interface ProductForm {
   sku_name: string
   code_name: string
+  ex_factory_price: string
   wholesale_price: string
   retail_price: string
   returnable: boolean

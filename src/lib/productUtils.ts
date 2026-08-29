@@ -8,9 +8,9 @@ export const getMockQuantity = (productId: string): number => {
   return (seed % 95) + 5 // Range: 5-99
 }
 
-export const getStockLevel = (quantity: number): StockLevel => {
-  if (quantity > 50) return 'high'
-  if (quantity >= 20) return 'medium'
+export const getStockLevel = (quantity: number, lowMax = 20, mediumMax = 50): StockLevel => {
+  if (quantity > mediumMax) return 'high'
+  if (quantity > lowMax) return 'medium'
   return 'low'
 }
 
@@ -41,6 +41,10 @@ export const validateProductForm = (formData: any): Record<string, string> => {
     errors.sku_name = 'Product name is required'
   } else if (formData.sku_name.trim().length < 2) {
     errors.sku_name = 'Product name must be at least 2 characters'
+  }
+  
+  if (formData.ex_factory_price && isNaN(parseFloat(formData.ex_factory_price))) {
+    errors.ex_factory_price = 'Invalid ex factory price'
   }
   
   if (formData.wholesale_price && isNaN(parseFloat(formData.wholesale_price))) {

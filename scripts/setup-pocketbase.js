@@ -289,6 +289,7 @@ async function main() {
         fld('text', 'sku_name', { required: true }),
         fld('bool', 'returnable'),
         fld('text', 'code_name'),
+        fld('number', 'ex_factory_price'),
         fld('number', 'wholesale_price'),
         fld('number', 'retail_price'),
         fld('date', 'deleted_at'),
@@ -427,6 +428,31 @@ async function main() {
         fld('text', 'reason'),
     ], {}, flags.force);
 
+    await ensureCollection('app_settings', 'base', [
+        fld('text', 'key', { required: true, unique: true }),
+        { system: false, id: `fld_${Date.now().toString(36)}_${++fieldCounter}`, name: 'value', type: 'json', required: false, unique: false },
+    ], {
+        listRule: ADMIN_RULE,
+        viewRule: ADMIN_RULE,
+        createRule: ADMIN_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
+    // Seed default app_settings if empty
+    const settingsCount = await pb.collection('app_settings').getList(1, 1, { perPage: 1 });
+    if (settingsCount.totalItems === 0 && !flags.dryRun) {
+        await pb.collection('app_settings').create({
+            key: 'stock_thresholds',
+            value: { low_max: 20, medium_max: 50 }
+        });
+        await pb.collection('app_settings').create({
+            key: 'wholesale_surcharge',
+            value: { amount: 2, product_ids: [] }
+        });
+        console.log('  [ok] seeded default app_settings');
+    }
+
     // Also create inventory_logs fields that may be missing on existing DBs
     const inventoryLogsCol = (await pb.collections.getFullList()).find((c) => c.name === 'inventory_logs');
     if (inventoryLogsCol) {
@@ -441,6 +467,22 @@ async function main() {
             console.log(`  [ok] added ${extraFields.length} missing field(s) to inventory_logs`);
         } else if (extraFields.length > 0) {
             console.log(`  [dry-run] would add ${extraFields.length} field(s) to inventory_logs`);
+        }
+    }
+
+    // Add ex_factory_price to products collection if missing on existing DBs
+    const productsCol = (await pb.collections.getFullList()).find((c) => c.name === 'products');
+    if (productsCol) {
+        const existingFieldNames = productsCol.fields.map((f) => f.name);
+        if (!existingFieldNames.includes('ex_factory_price')) {
+            if (!flags.dryRun) {
+                await pb.collections.update(productsCol.id, {
+                    fields: [...productsCol.fields, fld('number', 'ex_factory_price')]
+                });
+                console.log('  [ok] added ex_factory_price field to products');
+            } else {
+                console.log('  [dry-run] would add ex_factory_price field to products');
+            }
         }
     }
 
