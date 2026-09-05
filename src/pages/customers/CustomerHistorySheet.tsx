@@ -59,7 +59,7 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
             const orders = await pb.collection('orders').getFullList({
                 filter: `customer_id = "${customer.id}" && deleted_at = ""`,
                 sort: '-date_time',
-                fields: 'id, date_time, total_amount, status'
+                fields: 'id, order_number, date_time, total_amount, status'
             })
 
             // 2. Fetch Sales for those orders (with product names)
@@ -84,8 +84,8 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
             // 3. Fetch Empties Logs
             const empties = await pb.collection('empties_log').getFullList({
                 filter: `customer_id = "${customer.id}"`,
-                sort: '-created',
-                fields: 'id, date, activity, total_quantity, created'
+                sort: '-date',
+                fields: 'id, date, activity, total_quantity'
             })
 
             // 4. Fetch empties log details (with product names)
@@ -116,7 +116,7 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                     id: `order-${order.id}`,
                     date: order.date_time,
                     type: 'purchase',
-                    description: `Order #${order.id}`,
+                    description: `Order #${order.order_number}`,
                     amount: order.total_amount,
                     quantity: salesByOrder[order.id]?.reduce((sum: number, s) => sum + s.quantity, 0) || 0,
                     status: order.status,

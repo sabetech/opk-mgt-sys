@@ -368,6 +368,7 @@ async function main() {
 
     await ensureCollection('orders', 'base', [
         fld('relation', 'customer_id', { collectionId: customers.id, maxSelect: 1 }),
+        fld('number', 'order_number', { required: true, unique: true }),
         fld('number', 'total_amount', { required: true }),
         fld('number', 'amount_tendered'),
         fld('text', 'payment_type'),

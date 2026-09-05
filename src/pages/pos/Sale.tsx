@@ -12,6 +12,7 @@ import {
     Loader2
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
+import { generateOrderNumber } from "@/lib/orderNumber"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,6 +53,7 @@ interface Product {
     retail_price: number | null
     wholesale_price: number | null
     returnable?: boolean
+    quantity: number
 }
 
 interface Customer {
@@ -127,6 +129,15 @@ export default function Sale() {
     useEffect(() => {
         const fetchInitialData = async () => {
             try {
+                // Fetch stock quantities
+                const stockData = await pb.collection('warehouse_stock').getFullList({
+                    fields: 'product_id, quantity'
+                })
+                const stockMap = new Map<string, number>()
+                for (const s of stockData) {
+                    stockMap.set(s.product_id, s.quantity || 0)
+                }
+
                 // Fetch Products
                 const productsData = await pb.collection('products').getFullList({
                     filter: 'deleted_at = ""',
@@ -140,6 +151,7 @@ export default function Sale() {
                     retail_price: p.retail_price,
                     wholesale_price: p.wholesale_price,
                     returnable: p.returnable,
+                    quantity: stockMap.get(p.id) ?? 0,
                 })))
                 setLoadingProducts(false)
 
@@ -185,6 +197,10 @@ export default function Sale() {
 
     const handleAddToCart = () => {
         if (!selectedProduct || quantity <= 0) return
+        if (selectedProduct.quantity <= 0) {
+            toast.error("This product is out of stock.")
+            return
+        }
 
         const existingItem = cart.find(item => item.productId === selectedProduct.id)
         if (existingItem) {
@@ -293,9 +309,13 @@ export default function Sale() {
             // First, get the order_type_id for 'sale'
             const orderTypeData = await pb.collection('order_types').getFirstListItem('name = "sale"', { fields: 'id' })
 
+            // Generate sequential order number
+            const orderNumber = await generateOrderNumber()
+
             // Insert into orders header
             const orderData = await pb.collection('orders').create({
                 customer_id: selectedCustomer.id,
+                order_number: orderNumber,
                 total_amount: grandTotal,
                 payment_type: paymentType,
                 order_type_id: orderTypeData.id,
@@ -317,7 +337,7 @@ export default function Sale() {
                 await pb.collection('sales').create(sale)
             }
 
-            toast.success(`Order #${orderData.id} created successfully for ${selectedCustomer.name} and is pending approval.`)
+            toast.success(`Order #${orderNumber} created successfully for ${selectedCustomer.name} and is pending approval.`)
             setCart([])
             setSelectedCustomer(null)
         } catch (error: any) {
@@ -446,15 +466,21 @@ export default function Sale() {
                                                         {products.map((p) => (
                                                             <CommandItem
                                                                 key={p.id}
+                                                                disabled={p.quantity <= 0}
                                                                 onSelect={() => {
+                                                                    if (p.quantity <= 0) return
                                                                     setSelectedProduct(p)
                                                                     setProductPopoverOpen(false)
                                                                 }}
+                                                                className={p.quantity <= 0 ? "opacity-50 pointer-events-none" : ""}
                                                             >
-                                                                <div className="flex flex-col">
+                                                                <div className="flex flex-col flex-1">
                                                                     <span>{p.sku_name}</span>
                                                                     <span className="text-xs text-muted-foreground">{p.code_name || "No SKU"}</span>
                                                                 </div>
+                                                                <span className={`text-xs font-medium whitespace-nowrap ${p.quantity <= 0 ? "text-red-500" : "text-muted-foreground"}`}>
+                                                                    {p.quantity <= 0 ? "Out of stock" : `Qty: ${p.quantity}`}
+                                                                </span>
                                                             </CommandItem>
                                                         ))}
                                                     </CommandGroup>

@@ -89,7 +89,7 @@ export default function CompletedOrders() {
 
             const data = await pb.collection('warehouse_orders').getFullList({
                 filter: 'status = "ready"',
-                sort: '-created',
+                sort: '-id',
                 expand: 'order_id.customer_id',
                 fields: 'id, order_id, status'
             })
@@ -122,10 +122,12 @@ export default function CompletedOrders() {
                 return {
                     id: w.id,
                     order_id: w.order_id,
+                    order_number: order?.order_number ?? null,
                     status: w.status,
                     orders: order
                         ? {
                             id: order.id,
+                            order_number: order.order_number,
                             date_time: order.date_time,
                             total_amount: order.total_amount,
                             payment_type: order.payment_type,
@@ -309,7 +311,7 @@ export default function CompletedOrders() {
                                                     <ChevronRight className="h-4 w-4" />
                                                 )}
                                             </Button>
-                                            #{order.order_id}
+                                            #{order.order_number ?? order.order_id}
                                         </TableCell>
                                         <TableCell>{formatDate(order.orders?.date_time || new Date().toISOString())}</TableCell>
                                         <TableCell>{order.orders?.customers?.name || "Walk-in"}</TableCell>

@@ -15,9 +15,11 @@ import { pb } from "@/lib/pocketbase"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { format } from "date-fns"
+import ConfirmDialog from "@/components/ConfirmDialog"
 
 interface Order {
     id: string
+    order_number: number
     date_time: string
     total_amount: number
     status: 'pending' | 'approved' | 'cancelled'
@@ -36,16 +38,21 @@ export default function Orders() {
     const [searchTerm, setSearchTerm] = useState("")
     const navigate = useNavigate()
 
+    const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
+    const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
+    const [canceling, setCanceling] = useState(false)
+
     const fetchOrders = async () => {
         setLoading(true)
         try {
             const records = await pb.collection('orders').getFullList({
                 sort: '-date_time',
                 expand: 'customer_id,order_type_id',
-                fields: 'id, date_time, total_amount, status, customer_id, order_type_id'
+                fields: 'id, order_number, date_time, total_amount, status, customer_id, order_type_id'
             })
             setOrders(records.map((r) => ({
                 id: r.id,
+                order_number: r.order_number,
                 date_time: r.date_time,
                 total_amount: r.total_amount,
                 status: r.status,
@@ -65,16 +72,26 @@ export default function Orders() {
         fetchOrders()
     }, [])
 
-    const handleCancel = async (id: string) => {
-        if (!confirm("Are you sure you want to cancel this order?")) return
+    const openCancelDialog = (id: string) => {
+        setCancelOrderId(id)
+        setCancelDialogOpen(true)
+    }
 
+    const handleCancel = async () => {
+        if (!cancelOrderId) return
+
+        setCanceling(true)
         try {
-            await pb.collection('orders').update(id, { status: 'cancelled' })
+            await pb.collection('orders').update(cancelOrderId, { status: 'cancelled' })
             toast.success("Order cancelled.")
+            setCancelDialogOpen(false)
+            setCancelOrderId(null)
             fetchOrders()
         } catch (err) {
             console.error("Error cancelling order:", err)
             toast.error("Failed to cancel order.")
+        } finally {
+            setCanceling(false)
         }
     }
 
@@ -89,7 +106,7 @@ export default function Orders() {
 
     const filteredOrders = orders.filter(order =>
         (order.customers?.name || "Walk-in").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.id.toString().includes(searchTerm)
+        order.order_number.toString().includes(searchTerm)
     )
 
     return (
@@ -137,7 +154,7 @@ export default function Orders() {
                         ) : filteredOrders.length > 0 ? (
                             filteredOrders.map((order) => (
                                 <TableRow key={order.id}>
-                                    <TableCell className="font-mono text-sm">#{order.id}</TableCell>
+                                    <TableCell className="font-mono text-sm">#{order.order_number}</TableCell>
                                     <TableCell className="text-sm">
                                         {format(new Date(order.date_time), 'MMM dd, yyyy HH:mm')}
                                     </TableCell>
@@ -171,7 +188,7 @@ export default function Orders() {
                                                         size="sm"
                                                         variant="outline"
                                                         className="h-8 bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                                                        onClick={() => handleCancel(order.id)}
+                                                        onClick={() => openCancelDialog(order.id)}
                                                     >
                                                         <XCircle className="h-3.5 w-3.5 mr-1" /> Cancel
                                                     </Button>
@@ -200,6 +217,17 @@ export default function Orders() {
                     </TableBody>
                 </Table>
             </div>
+
+            <ConfirmDialog
+                open={cancelDialogOpen}
+                onOpenChange={setCancelDialogOpen}
+                title="Cancel Order"
+                description="Are you sure you want to cancel this order? This action cannot be undone."
+                confirmLabel="Cancel Order"
+                variant="destructive"
+                loading={canceling}
+                onConfirm={handleCancel}
+            />
         </div>
     )
 }

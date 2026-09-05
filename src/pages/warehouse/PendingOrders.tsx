@@ -35,6 +35,9 @@ interface Order {
         customers: {
             name: string
         } | null
+        order_type: {
+            name: string
+        } | null
     } | null
 }
 
@@ -53,9 +56,8 @@ export default function PendingOrders() {
         try {
             const data = await pb.collection('warehouse_orders').getFullList({
                 filter: 'status = "pending"',
-                sort: '-created',
-                expand: 'order_id.customer_id',
-                fields: 'id, order_id, status'
+                sort: '-id',
+                expand: 'order_id.customer_id,order_id.order_type_id',
             })
 
             const shaped = data.map((w) => {
@@ -63,12 +65,14 @@ export default function PendingOrders() {
                 return {
                     id: w.id,
                     order_id: w.order_id,
+                    order_number: order?.order_number ?? null,
                     status: w.status,
                     orders: order
                         ? {
                             total_amount: order.total_amount,
                             date_time: order.date_time,
                             customers: order.expand?.customer_id ?? null,
+                            order_type: order.expand?.order_type_id ?? null,
                         }
                         : null,
                 }
@@ -89,6 +93,7 @@ export default function PendingOrders() {
     // Filter orders
     const filteredOrders = orders.filter(order =>
         (order.orders?.customers?.name || "Walk-in").toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (order.orders?.order_type?.name || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
         order.order_id.toString().includes(searchTerm)
     )
 
@@ -119,10 +124,53 @@ export default function PendingOrders() {
 
         if (confirmed) {
             try {
-                // 1. Cancel Warehouse Order
+                // 1. Fetch warehouse order items to restore stock
+                const whItems = await pb.collection('warehouse_order_items').getFullList({
+                    filter: `warehouse_order_id = "${warehouseOrderId}"`,
+                    fields: 'product_id, quantity',
+                })
+
+                // 2. Determine sale type from POS order's customer
+                const posOrder = await pb.collection('orders').getOne(posOrderId, {
+                    fields: 'customer_id',
+                }).catch(() => null)
+                const customer = posOrder?.customer_id
+                    ? await pb.collection('customers').getOne(posOrder.customer_id, {
+                        expand: 'type_id',
+                        fields: 'id, name, type_id',
+                    }).catch(() => null)
+                    : null
+                const saleType = customer?.expand?.type_id?.name === 'Wholesaler'
+                    ? 'wholesale_sale'
+                    : 'retail_sale'
+
+                // 3. Restore stock and log reversal for each item
+                const today = new Date().toISOString().split('T')[0]
+                for (const item of whItems) {
+                    if (!item.product_id) continue
+                    const stock = await pb.collection('warehouse_stock')
+                        .getFirstListItem(`product_id = "${item.product_id}"`, { fields: 'id, quantity' })
+                        .catch(() => null)
+                    if (stock) {
+                        await pb.collection('warehouse_stock').update(stock.id, {
+                            quantity: (stock.quantity || 0) + item.quantity,
+                        })
+                    }
+                    await pb.collection('inventory_logs').create({
+                        date: today,
+                        product_id: item.product_id,
+                        type: saleType,
+                        quantity: item.quantity,
+                        reference_id: posOrderId,
+                        reference_table: 'orders',
+                        description: `Sale reverted - ${customer?.name || 'Walk-in'}`,
+                    })
+                }
+
+                // 4. Cancel Warehouse Order
                 await pb.collection('warehouse_orders').update(warehouseOrderId, { status: 'cancelled' })
 
-                // 2. Cancel POS Order (Revert Sale)
+                // 5. Cancel POS Order (Revert Sale)
                 await pb.collection('orders').update(posOrderId, { status: 'cancelled' })
 
                 toast.success("Sale reverted and warehouse order cancelled.")
@@ -200,6 +248,7 @@ export default function PendingOrders() {
                             <TableHead>Order ID</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Customer</TableHead>
+                            <TableHead>Type</TableHead>
                             <TableHead>Total Amount</TableHead>
                             <TableHead>Status</TableHead>
                             {profile?.role !== 'auditor' && <TableHead className="text-right">Actions</TableHead>}
@@ -209,9 +258,10 @@ export default function PendingOrders() {
                         {paginatedOrders.length > 0 ? (
                             paginatedOrders.map((order) => (
                                 <TableRow key={order.id}>
-                                    <TableCell className="font-mono text-xs">#{order.order_id}</TableCell>
+                                    <TableCell className="font-mono text-xs">#{order.order_number ?? order.order_id}</TableCell>
                                     <TableCell>{formatDate(order.orders?.date_time || new Date().toISOString())}</TableCell>
                                     <TableCell className="font-medium">{order.orders?.customers?.name || "Walk-in"}</TableCell>
+                                    <TableCell>{order.orders?.order_type?.name || "—"}</TableCell>
                                     <TableCell className="font-bold">GH₵ {order.orders?.total_amount.toFixed(2)}</TableCell>
                                     <TableCell>
                                         <Badge variant={getStatusBadgeVariant(order.status)}>
@@ -260,7 +310,7 @@ export default function PendingOrders() {
                             ))
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={profile?.role !== 'auditor' ? 6 : 5} className="h-24 text-center">
+                                <TableCell colSpan={profile?.role !== 'auditor' ? 7 : 6} className="h-24 text-center">
                                     No orders found.
                                 </TableCell>
                             </TableRow>

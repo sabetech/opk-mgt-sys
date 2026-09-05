@@ -37,6 +37,8 @@ import { useAuth } from "@/context/AuthContext"
 
 interface OrderDetail {
     id: string
+    order_number: number
+    customer_id: string | null
     date_time: string
     total_amount: number
     amount_tendered: number
@@ -53,6 +55,7 @@ interface OrderDetail {
 
 interface SaleItem {
     id: string
+    product_id: string
     quantity: number
     unit_price: number
     sub_total: number
@@ -82,7 +85,6 @@ export default function OrderDetails() {
                 // Fetch Order Header
                 const orderData: any = await pb.collection('orders').getOne(id, {
                     expand: 'customer_id,order_type_id',
-                    fields: 'id, date_time, total_amount, amount_tendered, payment_type, status, customer_id, order_type_id'
                 })
                 setOrder({
                     ...orderData,
@@ -95,7 +97,6 @@ export default function OrderDetails() {
                 const itemsData: any[] = await pb.collection('sales').getFullList({
                     filter: `order_id = "${id}" && deleted_at = ""`,
                     expand: 'product_id',
-                    fields: 'id, quantity, unit_price, sub_total, discount, product_id'
                 })
                 setItems(itemsData.map((r) => ({
                     ...r,
@@ -124,27 +125,70 @@ export default function OrderDetails() {
 
         setApproving(true)
         try {
-            // 1. Update POS order status
+            // Determine sale type (retail vs wholesale) from customer type
+            const customer = order.customer_id
+                ? await pb.collection('customers').getOne(order.customer_id, {
+                    expand: 'type_id',
+                    fields: 'id, name, type_id',
+                }).catch(() => null)
+                : null
+            const saleType = customer?.expand?.type_id?.name === 'Wholesaler'
+                ? 'wholesale_sale'
+                : 'retail_sale'
+
+            // 1. Validate stock for every item before mutating anything
+            const stockRecords: { item: typeof items[0]; stockId: string; currentQty: number }[] = []
+            for (const item of items) {
+                if (!item.product_id) continue
+                const stock = await pb.collection('warehouse_stock')
+                    .getFirstListItem(`product_id = "${item.product_id}"`, { fields: 'id, quantity' })
+                    .catch(() => null)
+                if (!stock || (stock.quantity || 0) < item.quantity) {
+                    toast.error(`Insufficient stock for ${item.products?.sku_name ?? 'product'}.`)
+                    setApproving(false)
+                    return
+                }
+                stockRecords.push({ item, stockId: stock.id, currentQty: stock.quantity || 0 })
+            }
+
+            // 2. Update POS order status
             await pb.collection('orders').update(order.id, {
                 status: 'approved',
                 amount_tendered: tendered
             })
 
-            // 2. Create Warehouse Order
+            // 3. Create Warehouse Order
             const warehouseOrder = await pb.collection('warehouse_orders').create({
                 order_id: order.id,
                 status: 'pending'
             })
 
-            // 3. Create Warehouse Order Items
+            // 4. Create Warehouse Order Items
             const warehouseItemsToInsert = items.map(item => ({
                 warehouse_order_id: warehouseOrder.id,
-                product_id: item.products?.id || null,
+                product_id: item.product_id,
                 quantity: item.quantity
             })).filter(item => item.product_id !== null)
 
             for (const wItem of warehouseItemsToInsert) {
                 await pb.collection('warehouse_order_items').create(wItem)
+            }
+
+            // 5. Deduct stock and log inventory movement for each item
+            const today = new Date().toISOString().split('T')[0]
+            for (const { item, stockId, currentQty } of stockRecords) {
+                await pb.collection('warehouse_stock').update(stockId, {
+                    quantity: Math.max(0, currentQty - item.quantity)
+                })
+                await pb.collection('inventory_logs').create({
+                    date: today,
+                    product_id: item.product_id,
+                    type: saleType,
+                    quantity: -item.quantity,
+                    reference_id: order.id,
+                    reference_table: 'orders',
+                    description: `Sale - ${customer?.name || 'Walk-in'}`,
+                })
             }
 
             toast.success("Order approved and sent to warehouse!")
@@ -187,7 +231,7 @@ export default function OrderDetails() {
                     <ChevronLeft className="h-5 w-5" />
                 </Button>
                 <div>
-                    <h2 className="text-3xl font-bold tracking-tight">Order #{order.id}</h2>
+                    <h2 className="text-3xl font-bold tracking-tight">Order #{order.order_number}</h2>
                     <p className="text-muted-foreground">Review and approve transaction details.</p>
                 </div>
                 <Badge

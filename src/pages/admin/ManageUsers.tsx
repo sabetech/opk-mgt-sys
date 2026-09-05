@@ -77,7 +77,7 @@ export default function ManageUsers() {
     const fetchProfiles = async () => {
         setLoading(true);
         try {
-            const records = await pb.collection('users').getFullList({ sort: '-created' });
+            const records = await pb.collection('users').getFullList({ sort: '-id' });
             setProfiles(records.map((r) => ({
                 id: r.id,
                 full_name: r.name ?? null,

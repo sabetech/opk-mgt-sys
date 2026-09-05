@@ -30,10 +30,11 @@ export default function AddCustomer() {
     useEffect(() => {
         const fetchTypes = async () => {
             try {
-                const data = await pb.collection('customer_types').getFullList({ sort: 'name' })
+                const data = await pb.collection('customer_types').getFullList({ sort: 'name', $autoCancel: false })
                 setCustomerTypes(data.map((t) => ({ id: t.id, name: t.name })))
             } catch (err) {
                 console.error("Error fetching customer types:", err)
+                toast.error("Failed to load customer types. Please try refreshing or logging in again.")
             }
         }
         fetchTypes()

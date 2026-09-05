@@ -40,6 +40,7 @@ export default function CustomerFormFields({ onSuccess }: CustomerFormFieldsProp
                 setCustomerTypes(data.map((t) => ({ id: t.id, name: t.name })))
             } catch (err) {
                 console.error("Error fetching customer types:", err)
+                toast.error("Failed to load customer types. Please try refreshing or logging in again.")
             } finally {
                 setFetchingTypes(false)
             }
