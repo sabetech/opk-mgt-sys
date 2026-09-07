@@ -48,6 +48,7 @@ interface OrderItem {
 interface Order {
     id: string
     order_id: string
+    order_number?: number
     status: "pending" | "ready" | "cancelled"
     orders: {
         total_amount: number

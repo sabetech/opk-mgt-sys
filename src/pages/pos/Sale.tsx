@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { useNavigate } from "react-router-dom"
+//import { useNavigate } from "react-router-dom"
 import {
     Search,
     ShoppingCart,
@@ -80,7 +80,7 @@ interface CartItem {
 }
 
 export default function Sale() {
-    const navigate = useNavigate()
+    //const navigate = useNavigate()
     const { profile } = useAuth()
     // State
     const [products, setProducts] = useState<Product[]>([])

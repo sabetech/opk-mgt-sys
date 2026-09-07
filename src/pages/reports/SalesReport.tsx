@@ -16,7 +16,7 @@ import {
     ChevronDown,
     Download,
     Printer,
-    FileText,
+    //FileText,
     Users,
     Package,
     ClipboardList,
@@ -449,7 +449,7 @@ export default function SalesReport() {
 
         for (const oid of orderIds) {
             const items = byOrder[oid]
-            const first = items[0]
+            //const first = items[0]
             const orderTotal = items.reduce((s, r) => s + r.sub_total, 0)
             grandTotal += orderTotal
 

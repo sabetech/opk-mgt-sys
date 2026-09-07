@@ -49,6 +49,7 @@ interface OrderItem {
 interface CompletedOrder {
     id: string
     order_id: string
+    order_number?: number
     status: string
     orders: {
         id: string
