@@ -37,6 +37,7 @@ import Adjustments from "@/pages/operations/Adjustments"
 import ReloadTruckEmpties from "@/pages/operations/ReloadTruckEmpties"
 import TruckReloadsToGGBL from "@/pages/operations/TruckReloadsToGGBL"
 import AdjustmentsLog from "@/pages/operations/AdjustmentsLog"
+import SalesReport from "@/pages/reports/SalesReport"
 import OperationsOverview from "@/pages/operations/OperationsOverview"
 import Setup from "@/pages/operations/Setup"
 import ProtectedRoute from "@/components/ProtectedRoute"
@@ -192,7 +193,7 @@ function App() {
               {/* Reports */}
               <Route path="reports">
                 <Route index element={<Navigate to="sales" replace />} />
-                <Route path="sales" element={<PlaceholderPage title="Sales Report" />} />
+                <Route path="sales" element={<SalesReport />} />
               </Route>
 
               {/* Admin */}

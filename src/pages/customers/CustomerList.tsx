@@ -80,7 +80,6 @@ export default function CustomerList() {
                 sort: 'name',
                 filter: 'deleted_at = ""',
                 expand: 'type_id',
-                fields: 'id, name, phone, balance, type_id, has_mou'
             })
             setCustomers(customersRecords.map((r) => ({
                 id: r.id,

@@ -335,7 +335,7 @@ async function main() {
         fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
         fld('select', 'type', {
             required: true,
-            values: ['supplier_receipt', 'vse_loadout', 'retail_sale', 'wholesale_sale', 'breakage', 'promo_out', 'promo_reimbursement', 'opening_stock', 'adjustment_increase', 'adjustment_decrease'],
+            values: ['supplier_receipt', 'vse_loadout', 'retail_sale', 'wholesale_sale', 'breakage', 'promo_out', 'promo_reimbursement', 'opening_stock', 'adjustment_increase', 'adjustment_decrease', 'customer_return'],
         }),
         fld('number', 'quantity', { required: true }),
         fld('text', 'reference_id'),
@@ -429,6 +429,35 @@ async function main() {
         fld('text', 'reason'),
     ], {}, flags.force);
 
+    const { users } = await getCollectionsMap();
+
+    await ensureCollection('returns', 'base', [
+        fld('relation', 'order_id', { collectionId: orders.id, required: true, maxSelect: 1, cascadeDelete: true }),
+        fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
+        fld('number', 'quantity', { required: true }),
+        fld('number', 'unit_price', { required: true }),
+        fld('number', 'refund_amount', { required: true }),
+        fld('text', 'reason'),
+        fld('relation', 'handled_by', { collectionId: users.id, maxSelect: 1 }),
+        fld('date', 'date', { required: true }),
+    ], {}, flags.force);
+
+    // Add 'created_by' field to orders collection if missing on existing DBs
+    const ordersCol = (await pb.collections.getFullList()).find((c) => c.name === 'orders');
+    if (ordersCol) {
+        const existingFieldNames = ordersCol.fields.map((f) => f.name);
+        if (!existingFieldNames.includes('created_by')) {
+            if (!flags.dryRun) {
+                await pb.collections.update(ordersCol.id, {
+                    fields: [...ordersCol.fields, fld('relation', 'created_by', { collectionId: users.id, maxSelect: 1 })],
+                });
+                console.log('  [ok] added created_by field to orders');
+            } else {
+                console.log('  [dry-run] would add created_by field to orders');
+            }
+        }
+    }
+
     await ensureCollection('app_settings', 'base', [
         fld('text', 'key', { required: true, unique: true }),
         { system: false, id: `fld_${Date.now().toString(36)}_${++fieldCounter}`, name: 'value', type: 'json', required: false, unique: false },
@@ -468,6 +497,21 @@ async function main() {
             console.log(`  [ok] added ${extraFields.length} missing field(s) to inventory_logs`);
         } else if (extraFields.length > 0) {
             console.log(`  [dry-run] would add ${extraFields.length} field(s) to inventory_logs`);
+        }
+
+        // Add 'customer_return' to the type select values if missing
+        const typeField = inventoryLogsCol.fields.find((f) => f.name === 'type');
+        if (typeField && Array.isArray(typeField.values) && !typeField.values.includes('customer_return')) {
+            const updatedValues = [...typeField.values, 'customer_return'];
+            const updatedFields = inventoryLogsCol.fields.map((f) =>
+                f.name === 'type' ? { ...f, values: updatedValues } : f
+            );
+            if (!flags.dryRun) {
+                await pb.collections.update(inventoryLogsCol.id, { fields: updatedFields });
+                console.log('  [ok] added "customer_return" to inventory_logs.type values');
+            } else {
+                console.log('  [dry-run] would add "customer_return" to inventory_logs.type values');
+            }
         }
     }
 

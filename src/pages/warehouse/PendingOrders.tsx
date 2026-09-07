@@ -10,7 +10,16 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Search, MoreHorizontal } from "lucide-react"
+import { Search, MoreHorizontal, Package } from "lucide-react"
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+    DialogClose,
+} from "@/components/ui/dialog"
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -25,6 +34,17 @@ import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 
 // Types
+interface OrderItem {
+    id: string
+    product_id: string
+    quantity: number
+    products: {
+        sku_name: string
+        code_name: string
+        returnable: boolean
+    } | null
+}
+
 interface Order {
     id: string
     order_id: string
@@ -39,6 +59,7 @@ interface Order {
             name: string
         } | null
     } | null
+    warehouse_order_items: OrderItem[]
 }
 
 const ITEMS_PER_PAGE = 20
@@ -49,6 +70,7 @@ export default function PendingOrders() {
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
     const [currentPage, setCurrentPage] = useState(1)
+    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
     // Fetch warehouse orders from PocketBase
     const fetchOrders = async () => {
@@ -59,6 +81,31 @@ export default function PendingOrders() {
                 sort: '-id',
                 expand: 'order_id.customer_id,order_id.order_type_id',
             })
+
+            const whOrderIds = data.map((w) => w.id)
+            const itemsData = whOrderIds.length > 0
+                ? await pb.collection('warehouse_order_items').getFullList({
+                    filter: whOrderIds.map(id => `warehouse_order_id = "${id}"`).join(' || '),
+                    expand: 'product_id',
+                })
+                : []
+
+            const itemsByWhOrder: Record<string, OrderItem[]> = {}
+            for (const item of itemsData) {
+                const rel = item.expand?.product_id
+                const shapedItem: OrderItem = {
+                    id: item.id,
+                    product_id: item.product_id,
+                    quantity: item.quantity,
+                    products: rel
+                        ? { sku_name: rel.sku_name, code_name: rel.code_name, returnable: rel.returnable }
+                        : null,
+                }
+                if (!itemsByWhOrder[item.warehouse_order_id]) {
+                    itemsByWhOrder[item.warehouse_order_id] = []
+                }
+                itemsByWhOrder[item.warehouse_order_id].push(shapedItem)
+            }
 
             const shaped = data.map((w) => {
                 const order = w.expand?.order_id ?? null
@@ -75,6 +122,7 @@ export default function PendingOrders() {
                             order_type: order.expand?.order_type_id ?? null,
                         }
                         : null,
+                    warehouse_order_items: itemsByWhOrder[w.id] || [],
                 }
             })
             setOrders(shaped)
@@ -257,7 +305,11 @@ export default function PendingOrders() {
                     <TableBody>
                         {paginatedOrders.length > 0 ? (
                             paginatedOrders.map((order) => (
-                                <TableRow key={order.id}>
+                                <TableRow
+                                    key={order.id}
+                                    className="cursor-pointer hover:bg-muted/50"
+                                    onClick={() => setSelectedOrder(order)}
+                                >
                                     <TableCell className="font-mono text-xs">#{order.order_number ?? order.order_id}</TableCell>
                                     <TableCell>{formatDate(order.orders?.date_time || new Date().toISOString())}</TableCell>
                                     <TableCell className="font-medium">{order.orders?.customers?.name || "Walk-in"}</TableCell>
@@ -346,6 +398,69 @@ export default function PendingOrders() {
                     </div>
                 </div>
             )}
+            {/* Order Details Dialog */}
+            <Dialog open={selectedOrder !== null} onOpenChange={(open) => { if (!open) setSelectedOrder(null) }}>
+                <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Package className="h-5 w-5" />
+                            Order #{selectedOrder?.order_number ?? selectedOrder?.order_id}
+                        </DialogTitle>
+                        <DialogDescription>
+                            {selectedOrder?.orders?.customers?.name || "Walk-in"}
+                            {selectedOrder?.orders?.order_type?.name && ` — ${selectedOrder.orders.order_type.name}`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {selectedOrder && (
+                        <div className="space-y-4">
+                            <div className="rounded-md border">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="bg-muted/50">
+                                            <TableHead>Code</TableHead>
+                                            <TableHead>Product</TableHead>
+                                            <TableHead className="text-center">Qty</TableHead>
+                                            <TableHead>Returnable</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {selectedOrder.warehouse_order_items.length > 0 ? (
+                                            selectedOrder.warehouse_order_items.map((item) => (
+                                                <TableRow key={item.id}>
+                                                    <TableCell className="font-mono text-xs">{item.products?.code_name ?? "—"}</TableCell>
+                                                    <TableCell className="font-medium">{item.products?.sku_name ?? "Unknown product"}</TableCell>
+                                                    <TableCell className="text-center">{item.quantity}</TableCell>
+                                                    <TableCell>
+                                                        <Badge variant={item.products?.returnable ? "default" : "outline"}>
+                                                            {item.products?.returnable ? "Yes" : "No"}
+                                                        </Badge>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="h-16 text-center text-muted-foreground">
+                                                    No items for this order.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                            <div className="flex justify-end">
+                                <p className="text-sm font-bold">
+                                    Total: GH₵ {selectedOrder.orders?.total_amount?.toFixed(2) ?? "0.00"}
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter>
+                        <DialogClose asChild>
+                            <Button variant="outline">Close</Button>
+                        </DialogClose>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }

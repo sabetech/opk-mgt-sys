@@ -48,7 +48,6 @@ export default function Orders() {
             const records = await pb.collection('orders').getFullList({
                 sort: '-date_time',
                 expand: 'customer_id,order_type_id',
-                fields: 'id, order_number, date_time, total_amount, status, customer_id, order_type_id'
             })
             setOrders(records.map((r) => ({
                 id: r.id,

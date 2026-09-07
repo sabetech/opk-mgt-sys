@@ -91,7 +91,6 @@ export default function CompletedOrders() {
                 filter: 'status = "ready"',
                 sort: '-id',
                 expand: 'order_id.customer_id',
-                fields: 'id, order_id, status'
             })
 
             const whOrderIds = data.map((w) => w.id)
@@ -188,20 +187,6 @@ export default function CompletedOrders() {
         setCurrentPage(1)
     }, [searchTerm, dateRange])
 
-    // Get status badge variant
-    const getStatusBadgeVariant = (status: string) => {
-        switch (status) {
-            case "approved":
-                return "default"
-            case "pending":
-                return "outline"
-            case "cancelled":
-                return "destructive"
-            default:
-                return "outline"
-        }
-    }
-
     // Format date
     const formatDate = (dateString: string) => {
         return format(new Date(dateString), 'MMM dd, yyyy HH:mm')
@@ -288,7 +273,6 @@ export default function CompletedOrders() {
                             <TableHead>Date</TableHead>
                             <TableHead>Customer</TableHead>
                             <TableHead>Total Amount</TableHead>
-                            <TableHead>Status</TableHead>
                             <TableHead>Items</TableHead>
                             <TableHead className="text-right">Actions</TableHead>
                         </TableRow>
@@ -316,11 +300,6 @@ export default function CompletedOrders() {
                                         <TableCell>{formatDate(order.orders?.date_time || new Date().toISOString())}</TableCell>
                                         <TableCell>{order.orders?.customers?.name || "Walk-in"}</TableCell>
                                         <TableCell className="font-medium">{formatCurrency(order.orders?.total_amount || 0)}</TableCell>
-                                        <TableCell>
-                                            <Badge variant={getStatusBadgeVariant(order.status)}>
-                                                {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                                            </Badge>
-                                        </TableCell>
                                         <TableCell>{order.warehouse_order_items?.length || 0}</TableCell>
                                         <TableCell className="text-right">
                                             <DropdownMenu>
@@ -344,7 +323,7 @@ export default function CompletedOrders() {
                                     </TableRow>
                                     {expandedRows.has(order.id) && (
                                         <TableRow>
-                                            <TableCell colSpan={7} className="bg-gray-50 dark:bg-muted/20 p-4">
+                                            <TableCell colSpan={6} className="bg-gray-50 dark:bg-muted/20 p-4">
                                                 <div className="space-y-4">
                                                     <h4 className="font-semibold text-sm text-gray-700 dark:text-gray-300">Order Items</h4>
                                                     <div className="rounded-md border bg-white dark:bg-card">
@@ -383,7 +362,7 @@ export default function CompletedOrders() {
                             ))
                         ) : (
                             <TableRow>
-                                <TableCell colSpan={7} className="h-24 text-center">
+                                <TableCell colSpan={6} className="h-24 text-center">
                                     No completed orders found.
                                 </TableCell>
                             </TableRow>

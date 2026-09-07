@@ -48,16 +48,26 @@ export default function StockReport() {
                 sort: 'sku_name'
             })
 
-            // Transform and add mock quantities for demonstration
-            // In production, you would fetch actual stock quantities from inventory table
+            // Fetch actual warehouse stock quantities
+            const stockData = await pb.collection('warehouse_stock').getFullList({
+                filter: data.map(p => `product_id = "${p.id}"`).join(' || '),
+                fields: 'product_id, quantity',
+            })
+
+            // Map product_id -> quantity
+            const stockMap: Record<string, number> = {}
+            for (const stock of stockData) {
+                stockMap[stock.product_id] = stock.quantity || 0
+            }
+
             const transformedProducts: ProductStock[] = data.map((item) => {
-                const mockQuantity = Math.floor(Math.random() * 150) // Random quantity for demo
+                const quantity = stockMap[item.id] ?? 0
                 return {
                     id: item.id,
                     name: item.sku_name,
                     code: item.code_name || '',
-                    quantity: mockQuantity,
-                    status: getStockStatus(mockQuantity)
+                    quantity,
+                    status: getStockStatus(quantity)
                 }
             })
 

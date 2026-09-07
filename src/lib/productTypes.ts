@@ -8,7 +8,7 @@ export interface Product {
   returnable: boolean
   created: string
   deleted_at: string | null
-  quantity: number // Mocked quantity
+  quantity: number
 }
 
 export interface ProductForm {

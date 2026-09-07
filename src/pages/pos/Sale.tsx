@@ -12,6 +12,7 @@ import {
     Loader2
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
+import { useAuth } from "@/context/AuthContext"
 import { generateOrderNumber } from "@/lib/orderNumber"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -80,6 +81,7 @@ interface CartItem {
 
 export default function Sale() {
     const navigate = useNavigate()
+    const { profile } = useAuth()
     // State
     const [products, setProducts] = useState<Product[]>([])
     const [customers, setCustomers] = useState<Customer[]>([])
@@ -320,7 +322,8 @@ export default function Sale() {
                 payment_type: paymentType,
                 order_type_id: orderTypeData.id,
                 status: 'pending',
-                date_time: new Date().toISOString()
+                date_time: new Date().toISOString(),
+                created_by: profile?.id || '',
             })
 
             // Insert into sales (order items)

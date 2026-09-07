@@ -14,7 +14,7 @@ import { Trash2, Search, Plus, Edit2 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
-import { getMockQuantity, formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
+import { formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
 import ProductDialog from "./ProductDialog"
 import { toast } from "sonner"
 
@@ -42,7 +42,19 @@ export default function Products() {
                 sort: 'sku_name'
             })
 
-            // Add mock quantities
+            // Fetch actual warehouse stock quantities
+            const stockData = await pb.collection('warehouse_stock').getFullList({
+                filter: data.map(p => `product_id = "${p.id}"`).join(' || '),
+                fields: 'product_id, quantity',
+            })
+
+            // Map product_id -> quantity
+            const stockMap: Record<string, number> = {}
+            for (const stock of stockData) {
+                stockMap[stock.product_id] = stock.quantity || 0
+            }
+
+            // Add real quantities from warehouse_stock
             const productsWithQuantity = data.map((product) => ({
                 id: product.id,
                 sku_name: product.sku_name,
@@ -53,7 +65,7 @@ export default function Products() {
                 returnable: product.returnable,
                 created: product.created,
                 deleted_at: product.deleted_at,
-                quantity: getMockQuantity(product.id)
+                quantity: stockMap[product.id] ?? 0
             }))
 
             setProducts(productsWithQuantity)
@@ -125,7 +137,7 @@ export default function Products() {
                     returnable: formData.returnable
                 })
 
-                // Add to local state with mock quantity
+                // Add to local state with zero quantity
                 const newProduct: Product = {
                     id: data.id,
                     sku_name: formData.sku_name,
@@ -136,7 +148,7 @@ export default function Products() {
                     returnable: formData.returnable,
                     created: data.created,
                     deleted_at: data.deleted_at ?? null,
-                    quantity: getMockQuantity(data.id)
+                    quantity: 0
                 }
                 setProducts(prev => [...prev, newProduct])
 
