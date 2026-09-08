@@ -32,6 +32,12 @@ export default function AddUser() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        if (password.length < 10) {
+            toast.error('Password must be at least 10 characters long.');
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -53,7 +59,7 @@ export default function AddUser() {
             setPassword('');
             setRole('auditor');
         } catch (error: any) {
-            console.error('Error creating user:', error);
+            console.error('Error creating user:', error?.response?.data || error);
             toast.error(error.response?.data?.message || error.message || 'Failed to create user');
         } finally {
             setLoading(false);
@@ -105,7 +111,11 @@ export default function AddUser() {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 required
+                                minLength={10}
                             />
+                            <p className="text-[0.8rem] text-muted-foreground">
+                                Minimum 10 characters required.
+                            </p>
                         </div>
                         <div className="space-y-2">
                             <Label htmlFor="role">Role</Label>

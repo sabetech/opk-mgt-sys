@@ -178,13 +178,13 @@ function App() {
                   </ProtectedRoute>
                 } />
                 <Route path="orders" element={
-                  <ProtectedRoute allowedRoles={['admin', 'cashier', 'auditor']}>
+                  <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'cashier', 'auditor']}>
                     <Orders />
                   </ProtectedRoute>
                 } />
                 <Route path="orders/:id" element={<OrderDetails />} />
                 <Route path="manage-products" element={
-                  <ProtectedRoute allowedRoles={['admin']}>
+                  <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
                     <ManageProducts />
                   </ProtectedRoute>
                 } />
