@@ -162,7 +162,10 @@ export default function Adjustments() {
             for (const item of formData.items) {
                 const stockRecord = await pb.collection('warehouse_stock').getFirstListItem(`product_id = "${item.productId}"`, {
                     fields: 'id, quantity'
-                }).catch(() => null)
+                }).catch((err) => {
+                    if (err?.status === 404) return null
+                    throw err
+                })
 
                 if (formData.direction === "decrease" && stockRecord) {
                     const currentQty = stockRecord.quantity || 0

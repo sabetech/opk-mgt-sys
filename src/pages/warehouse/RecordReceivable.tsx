@@ -208,7 +208,10 @@ export default function RecordReceivable() {
             for (const item of formData.items) {
                 const stock = await pb.collection('warehouse_stock')
                     .getFirstListItem(`product_id = "${item.productId}"`, { fields: 'id, quantity' })
-                    .catch(() => null)
+                    .catch((err) => {
+                        if (err?.status === 404) return null
+                        throw err
+                    })
 
                 if (stock) {
                     await pb.collection('warehouse_stock').update(stock.id, {

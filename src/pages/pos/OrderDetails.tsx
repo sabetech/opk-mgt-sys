@@ -182,7 +182,10 @@ export default function OrderDetails() {
                 if (!item.product_id) continue
                 const stock = await pb.collection('warehouse_stock')
                     .getFirstListItem(`product_id = "${item.product_id}"`, { fields: 'id, quantity' })
-                    .catch(() => null)
+                    .catch((err) => {
+                        if (err?.status === 404) return null
+                        throw err
+                    })
                 if (!stock || (stock.quantity || 0) < item.quantity) {
                     toast.error(`Insufficient stock for ${item.products?.sku_name ?? 'product'}.`)
                     setApproving(false)
@@ -299,7 +302,10 @@ export default function OrderDetails() {
                 // 2. Restore warehouse stock
                 const stock = await pb.collection('warehouse_stock')
                     .getFirstListItem(`product_id = "${item.product_id}"`, { fields: 'id, quantity' })
-                    .catch(() => null)
+                    .catch((err) => {
+                        if (err?.status === 404) return null
+                        throw err
+                    })
                 if (stock) {
                     await pb.collection('warehouse_stock').update(stock.id, {
                         quantity: (stock.quantity || 0) + returnQty,

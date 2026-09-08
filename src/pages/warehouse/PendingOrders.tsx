@@ -199,7 +199,10 @@ export default function PendingOrders() {
                     if (!item.product_id) continue
                     const stock = await pb.collection('warehouse_stock')
                         .getFirstListItem(`product_id = "${item.product_id}"`, { fields: 'id, quantity' })
-                        .catch(() => null)
+                        .catch((err) => {
+                            if (err?.status === 404) return null
+                            throw err
+                        })
                     if (stock) {
                         await pb.collection('warehouse_stock').update(stock.id, {
                             quantity: (stock.quantity || 0) + item.quantity,
