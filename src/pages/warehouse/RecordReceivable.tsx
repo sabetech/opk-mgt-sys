@@ -203,6 +203,35 @@ export default function RecordReceivable() {
                 })
             }
 
+            // 3. Update warehouse_stock and create inventory_logs for each product
+            const today = new Date().toISOString().split('T')[0]
+            for (const item of formData.items) {
+                const stock = await pb.collection('warehouse_stock')
+                    .getFirstListItem(`product_id = "${item.productId}"`, { fields: 'id, quantity' })
+                    .catch(() => null)
+
+                if (stock) {
+                    await pb.collection('warehouse_stock').update(stock.id, {
+                        quantity: (stock.quantity || 0) + item.quantity
+                    })
+                } else {
+                    await pb.collection('warehouse_stock').create({
+                        product_id: item.productId,
+                        quantity: item.quantity
+                    })
+                }
+
+                await pb.collection('inventory_logs').create({
+                    date: today,
+                    product_id: item.productId,
+                    type: 'supplier_receipt',
+                    quantity: item.quantity,
+                    reference_id: receivableData.id,
+                    reference_table: 'inventory_receivables',
+                    description: `Supplier receipt - PO ${formData.purchaseOrderNumber}`,
+                })
+            }
+
             toast.success('Receivable recorded successfully and stock updated!')
 
             // Reset form
