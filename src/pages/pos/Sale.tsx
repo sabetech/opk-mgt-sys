@@ -9,11 +9,13 @@ import {
     Package,
     Wallet,
     CheckCircle2,
-    Loader2
+    Loader2,
+    Printer
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import { generateOrderNumber } from "@/lib/orderNumber"
+import { buildSaleReceiptHtml, printReceiptHtml, type CompletedSale } from "@/lib/receipt"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -43,7 +45,7 @@ import {
     CommandList,
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import CustomerFormFields from "@/components/CustomerFormFields"
 
@@ -257,6 +259,18 @@ export default function Sale() {
     const isBalanceInsufficient = !selectedCustomer?.has_mou && projectedBalance < 0
 
     const [processing, setProcessing] = useState(false)
+    const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
+    const [successOpen, setSuccessOpen] = useState(false)
+
+    const handleCloseSuccess = () => {
+        setSuccessOpen(false)
+        setCompletedSale(null)
+    }
+
+    const handlePrintReceipt = () => {
+        if (!completedSale) return
+        printReceiptHtml(buildSaleReceiptHtml(completedSale), `Receipt #${completedSale.orderNumber}`)
+    }
 
     const handleCheckout = async () => {
         if (!selectedCustomer) {
@@ -341,6 +355,25 @@ export default function Sale() {
             }
 
             toast.success(`Order #${orderNumber} created successfully for ${selectedCustomer.name} and is pending approval.`)
+            setCompletedSale({
+                orderNumber,
+                dateTime: new Date(),
+                customerName: selectedCustomer.name,
+                customerType: selectedCustomer.customer_types?.name ?? null,
+                paymentType,
+                servedBy: profile?.full_name ?? null,
+                items: cart.map((item) => ({
+                    productName: item.productName,
+                    skuCode: item.skuCode,
+                    quantity: item.quantity,
+                    price: item.price,
+                    surcharge: item.surcharge,
+                    total: item.total,
+                })),
+                totalQuantity,
+                grandTotal,
+            })
+            setSuccessOpen(true)
             setCart([])
             setSelectedCustomer(null)
         } catch (error: any) {
@@ -736,6 +769,58 @@ export default function Sale() {
                             setAddCustomerOpen(false)
                         }}
                     />
+                </DialogContent>
+            </Dialog>
+
+            {/* Sale Success Dialog */}
+            <Dialog open={successOpen} onOpenChange={(open) => { if (!open) handleCloseSuccess() }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-green-700">
+                            <CheckCircle2 className="h-5 w-5" />
+                            Sale Completed
+                        </DialogTitle>
+                        <DialogDescription>
+                            {completedSale
+                                ? `Order #${completedSale.orderNumber} for ${completedSale.customerName} was processed successfully and is pending approval.`
+                                : "Sale processed successfully."}
+                        </DialogDescription>
+                    </DialogHeader>
+                    {completedSale && (
+                        <div className="rounded-lg border bg-muted/20 p-4">
+                            <div className="mx-auto max-w-[280px] bg-white p-3 font-mono text-xs leading-relaxed text-black shadow-sm">
+                                <p className="text-center font-bold">OPPONG KYEKYEKU<br />DISTRIBUTION LTD</p>
+                                <p className="text-center">*** SALES RECEIPT ***</p>
+                                <div className="my-2 border-t border-dashed border-black" />
+                                <p>Order No: <strong>#{completedSale.orderNumber}</strong></p>
+                                <p>Customer: <strong>{completedSale.customerName}</strong></p>
+                                <p>Payment: {completedSale.paymentType.replace(/_/g, " ")}</p>
+                                <div className="my-2 border-t border-dashed border-black" />
+                                {completedSale.items.map((item, index) => (
+                                    <div key={`${item.skuCode}-${index}`} className="mb-1">
+                                        <p className="font-bold">{index + 1}. {item.productName}</p>
+                                        <p className="flex justify-between">
+                                            <span>{item.quantity} x {(item.price + item.surcharge).toFixed(2)}</span>
+                                            <span>{item.total.toFixed(2)}</span>
+                                        </p>
+                                    </div>
+                                ))}
+                                <div className="my-2 border-t border-dashed border-black" />
+                                <p className="flex justify-between font-bold">
+                                    <span>TOTAL:</span>
+                                    <span>GH₵ {completedSale.grandTotal.toFixed(2)}</span>
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button variant="outline" onClick={handleCloseSuccess}>
+                            Ok
+                        </Button>
+                        <Button onClick={handlePrintReceipt} className="bg-amber-800 hover:bg-amber-900">
+                            <Printer className="h-4 w-4 mr-2" /> Print Receipt
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

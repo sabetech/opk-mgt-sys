@@ -79,8 +79,6 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Products", href: "/dashboard/warehouse/products", roles: ["admin", "auditor"] },
                 { title: "Pending Orders", href: "/dashboard/warehouse/pending-orders", roles: ["admin", "auditor"] },
                 { title: "Completed Orders", href: "/dashboard/warehouse/completed-orders", roles: ["admin", "auditor"] },
-                { title: "Adjust Stock", href: "/dashboard/warehouse/adjust-stock", roles: ["admin"] },
-                { title: "Record Receivable", href: "/dashboard/warehouse/record-receivable", roles: ["admin"] },
                 { title: "Receivables Log", href: "/dashboard/warehouse/receivables-log", roles: ["admin", "auditor"] },
                 { title: "Inventory Log", href: "/dashboard/warehouse/inventory-log", roles: ["admin", "auditor"] },
                 { title: "Add Loadout", href: "/dashboard/warehouse/add-loadout", roles: ["admin"] },

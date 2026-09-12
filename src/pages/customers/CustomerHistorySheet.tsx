@@ -203,7 +203,7 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                             <div>
                                                 <p className="font-bold text-sm">{entry.description}</p>
                                                 <p className="text-xs text-muted-foreground">
-                                                    {format(new Date(entry.date), 'MMM dd, yyyy • hh:mm a')}
+                                                    {entry.date ? format(new Date(entry.date), 'MMM dd, yyyy • hh:mm a') : 'No date'}
                                                 </p>
                                             </div>
                                         </div>
