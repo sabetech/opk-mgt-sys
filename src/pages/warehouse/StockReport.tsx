@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, Package, AlertTriangle, XCircle, BarChart3 } from "lucide-react"
+import { useNavigate } from "react-router-dom"
+import { Calendar as CalendarIcon, Package, AlertTriangle, XCircle, BarChart3, ClipboardList, ArrowRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -30,15 +31,42 @@ type ProductStock = {
     status: StockStatus
 }
 
+type StockTake = {
+    id: string
+    date: string
+    takenBy: string
+    notes: string
+}
+
+type TakeComparisonRow = {
+    productId: string
+    name: string
+    code: string
+    systemAtTake: number
+    counted: number
+    varianceAtTake: number
+    current: number
+    drift: number
+}
+
 export default function StockReport() {
+    const navigate = useNavigate()
     const [date, setDate] = useState<Date | undefined>(new Date())
     const [calendarOpen, setCalendarOpen] = useState(false)
     const [products, setProducts] = useState<ProductStock[]>([])
     const [loading, setLoading] = useState(true)
 
+    // Take-vs-current comparison state
+    const [takes, setTakes] = useState<StockTake[]>([])
+    const [takesAvailable, setTakesAvailable] = useState(true)
+    const [selectedTakeId, setSelectedTakeId] = useState<string>("")
+    const [comparison, setComparison] = useState<TakeComparisonRow[]>([])
+    const [takeLoading, setTakeLoading] = useState(false)
+
     // Fetch products from database
     useEffect(() => {
         fetchProducts()
+        fetchTakes()
     }, [])
 
     const fetchProducts = async () => {
@@ -78,6 +106,93 @@ export default function StockReport() {
             setLoading(false)
         }
     }
+
+    const fetchTakes = async () => {
+        try {
+            const rows = await pb.collection('stock_takes').getFullList({
+                sort: '-date,-created',
+                perPage: 30,
+            })
+            const mapped: StockTake[] = rows.map((r) => ({
+                id: r.id,
+                date: r.date,
+                takenBy: r.taken_by || 'N/A',
+                notes: r.notes || '',
+            }))
+            setTakes(mapped)
+            if (mapped.length > 0) {
+                setSelectedTakeId(mapped[0].id)
+                fetchTakeComparison(mapped[0].id)
+            }
+        } catch (error: any) {
+            const msg = error?.message || ''
+            if (msg.includes('Missing collection') || error?.status === 404) {
+                setTakesAvailable(false)
+            } else {
+                console.error('Error fetching stock takes:', error)
+            }
+        }
+    }
+
+    const fetchTakeComparison = async (takeId: string) => {
+        setTakeLoading(true)
+        try {
+            const items = await pb.collection('stock_take_items').getFullList({
+                filter: `take_id = "${takeId}"`,
+                expand: 'product_id',
+            })
+            // Live quantities for drift calculation
+            const currentMap: Record<string, number> = {}
+            for (const p of products) currentMap[p.id] = p.quantity
+            if (Object.keys(currentMap).length === 0) {
+                const live = await pb.collection('warehouse_stock').getFullList({ fields: 'product_id, quantity' })
+                for (const s of live) currentMap[s.product_id] = s.quantity || 0
+            }
+            const rows: TakeComparisonRow[] = items.map((it) => {
+                const product = it.expand?.product_id
+                const pid = typeof it.product_id === 'string' ? it.product_id : product?.id || ''
+                const current = currentMap[pid] ?? 0
+                return {
+                    productId: pid,
+                    name: product?.sku_name || 'Unknown',
+                    code: product?.code_name || 'N/A',
+                    systemAtTake: it.system_qty ?? 0,
+                    counted: it.physical_qty ?? 0,
+                    varianceAtTake: it.variance ?? ((it.physical_qty ?? 0) - (it.system_qty ?? 0)),
+                    current,
+                    drift: current - (it.physical_qty ?? 0),
+                }
+            })
+            setComparison(rows)
+        } catch (error) {
+            console.error('Error fetching take comparison:', error)
+        } finally {
+            setTakeLoading(false)
+        }
+    }
+
+    const handleTakeChange = (takeId: string) => {
+        setSelectedTakeId(takeId)
+        if (takeId) fetchTakeComparison(takeId)
+        else setComparison([])
+    }
+
+    const requestAdjustmentFor = (row: TakeComparisonRow) => {
+        const diff = row.current - row.counted
+        if (diff === 0) return
+        const direction = diff < 0 ? 'increase' : 'decrease'
+        const params = new URLSearchParams({
+            direction,
+            product: row.productId,
+            qty: String(Math.abs(diff)),
+            reason: 'stock_correction',
+            notes: `From stock take ${selectedTake?.date ? format(new Date(selectedTake.date), 'MMM d, yyyy') : ''}: counted ${row.counted}, current ${row.current}`.trim(),
+        })
+        navigate(`/dashboard/operations/adjustments?${params.toString()}`)
+    }
+
+    const selectedTake = takes.find((t) => t.id === selectedTakeId)
+    const varianceCount = comparison.filter((r) => r.varianceAtTake !== 0).length
 
     const getStockStatus = (quantity: number): StockStatus => {
         if (quantity === 0) return 'out'
@@ -158,6 +273,116 @@ export default function StockReport() {
                     </PopoverContent>
                 </Popover>
             </div>
+
+            {/* Stock Take Comparison */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <ClipboardList className="h-5 w-5 text-muted-foreground" />
+                        Stock Take Comparison
+                    </CardTitle>
+                    <CardDescription>
+                        Frozen counts from a submitted take versus live warehouse stock. Request corrections via Adjustments (admin approval required).
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {!takesAvailable ? (
+                        <p className="text-sm text-muted-foreground italic">
+                            No stock takes yet — submit one from Take Stock (run scripts/setup-pocketbase.js if the stock_takes collection is missing).
+                        </p>
+                    ) : takes.length === 0 ? (
+                        <p className="text-sm text-muted-foreground italic">No stock takes submitted yet.</p>
+                    ) : (
+                        <>
+                            <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+                                <select
+                                    value={selectedTakeId}
+                                    onChange={(e) => handleTakeChange(e.target.value)}
+                                    className="flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm max-w-md"
+                                >
+                                    {takes.map((t) => (
+                                        <option key={t.id} value={t.id}>
+                                            {t.date ? format(new Date(t.date), 'MMM d, yyyy') : 'Take'} — {t.takenBy}{t.notes ? ` — ${t.notes}` : ''}
+                                        </option>
+                                    ))}
+                                </select>
+                                {selectedTake && (
+                                    <Badge variant="secondary">
+                                        {comparison.length} product(s), {varianceCount} variance(s)
+                                    </Badge>
+                                )}
+                            </div>
+
+                            <div className="rounded-md border bg-white dark:bg-card overflow-x-auto">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow className="bg-muted/50">
+                                            <TableHead>Product</TableHead>
+                                            <TableHead className="text-right">System @ Take</TableHead>
+                                            <TableHead className="text-right">Counted</TableHead>
+                                            <TableHead className="text-right">Variance @ Take</TableHead>
+                                            <TableHead className="text-right">Current</TableHead>
+                                            <TableHead className="text-right">Drift Since Take</TableHead>
+                                            <TableHead className="text-right">Action</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {takeLoading ? (
+                                            <TableRow>
+                                                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
+                                                    Loading take...
+                                                </TableCell>
+                                            </TableRow>
+                                        ) : comparison.length > 0 ? (
+                                            comparison.map((row) => (
+                                                <TableRow key={row.productId} className="hover:bg-muted/50">
+                                                    <TableCell className="font-medium">
+                                                        <div className="flex items-center gap-2">
+                                                            <Package className="h-4 w-4 text-muted-foreground" />
+                                                            <span>{row.name}</span>
+                                                            {row.code && <Badge variant="outline" className="text-xs">{row.code}</Badge>}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-mono">{row.systemAtTake}</TableCell>
+                                                    <TableCell className="text-right font-mono font-bold">{row.counted}</TableCell>
+                                                    <TableCell className={cn(
+                                                        "text-right font-mono font-bold",
+                                                        row.varianceAtTake === 0 ? "text-muted-foreground" : row.varianceAtTake > 0 ? "text-green-600" : "text-red-600"
+                                                    )}>
+                                                        {row.varianceAtTake > 0 ? `+${row.varianceAtTake}` : row.varianceAtTake}
+                                                    </TableCell>
+                                                    <TableCell className="text-right font-mono">{row.current}</TableCell>
+                                                    <TableCell className={cn(
+                                                        "text-right font-mono",
+                                                        row.drift === 0 ? "text-muted-foreground" : "font-bold text-amber-600"
+                                                    )}>
+                                                        {row.drift > 0 ? `+${row.drift}` : row.drift}
+                                                    </TableCell>
+                                                    <TableCell className="text-right">
+                                                        {row.current !== row.counted ? (
+                                                            <Button size="sm" variant="outline" onClick={() => requestAdjustmentFor(row)}>
+                                                                Request fix <ArrowRight className="ml-1 h-3 w-3" />
+                                                            </Button>
+                                                        ) : (
+                                                            <span className="text-xs text-muted-foreground">In sync</span>
+                                                        )}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={7} className="h-24 text-center text-muted-foreground italic">
+                                                    No items in this take.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+                        </>
+                    )}
+                </CardContent>
+            </Card>
 
             {/* Summary Statistics Cards */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

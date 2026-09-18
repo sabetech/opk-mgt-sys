@@ -31,12 +31,16 @@ import { Toaster } from "sonner"
 import AddUser from "@/pages/admin/AddUser"
 import ManageUsers from "@/pages/admin/ManageUsers"
 import Settings from "@/pages/admin/Settings"
+import StockAdjustmentRequests from "@/pages/admin/StockAdjustmentRequests"
 import StocksComingIn from "@/pages/operations/StocksComingIn"
 import StocksComingInLog from "@/pages/operations/StocksComingInLog"
 import Adjustments from "@/pages/operations/Adjustments"
+import AdjustmentRequests from "@/pages/operations/AdjustmentRequests"
 import ReloadTruckEmpties from "@/pages/operations/ReloadTruckEmpties"
 import TruckReloadsToGGBL from "@/pages/operations/TruckReloadsToGGBL"
 import AdjustmentsLog from "@/pages/operations/AdjustmentsLog"
+import TakeEmptiesCount from "@/pages/operations/TakeEmptiesCount"
+import EmptiesCountReports from "@/pages/operations/EmptiesCountReports"
 import SalesReport from "@/pages/reports/SalesReport"
 import OperationsOverview from "@/pages/operations/OperationsOverview"
 import Setup from "@/pages/operations/Setup"
@@ -113,22 +117,26 @@ function App() {
                 } />
                 <Route path="loadout" element={<Loadout />} />
                 <Route path="take-stock" element={
-                  <ProtectedRoute allowedRoles={['admin']}>
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager']}>
                     <TakeStock />
                   </ProtectedRoute>
                 } />
                 <Route path="breakages" element={
-                  <ProtectedRoute allowedRoles={['admin']}>
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager']}>
                     <Breakages />
                   </ProtectedRoute>
                 } />
-                <Route path="stock-reports" element={<StockReport />} />
+                <Route path="stock-reports" element={
+                  <ProtectedRoute allowedRoles={['admin', 'auditor', 'operations_manager', 'warehouse_manager']}>
+                    <StockReport />
+                  </ProtectedRoute>
+                } />
               </Route>
 
               {/* Operations */}
               <Route path="operations" element={<Outlet />}>
                 <Route index element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager', 'auditor', 'sales_manager']}>
                     <OperationsOverview />
                   </ProtectedRoute>
                 } />
@@ -143,13 +151,28 @@ function App() {
                   </ProtectedRoute>
                 } />
                 <Route path="adjustments" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager']}>
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager']}>
                     <Adjustments />
                   </ProtectedRoute>
                 } />
+                <Route path="adjustment-requests" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager', 'auditor']}>
+                    <AdjustmentRequests />
+                  </ProtectedRoute>
+                } />
                 <Route path="adjustments-log" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor', 'sales_manager']}>
                     <AdjustmentsLog />
+                  </ProtectedRoute>
+                } />
+                <Route path="empties-count" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager', 'empties_manager']}>
+                    <TakeEmptiesCount />
+                  </ProtectedRoute>
+                } />
+                <Route path="empties-count-reports" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager', 'auditor', 'empties_manager']}>
+                    <EmptiesCountReports />
                   </ProtectedRoute>
                 } />
                 <Route path="stocks-coming-in-log" element={
@@ -205,6 +228,7 @@ function App() {
                 <Route path="manage-users" element={<ManageUsers />} />
                 <Route path="add-user" element={<AddUser />} />
                 <Route path="settings" element={<Settings />} />
+                <Route path="stock-adjustment-requests" element={<StockAdjustmentRequests />} />
               </Route>
             </Route>
           </Routes>

@@ -10,8 +10,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Search, Plus, Edit2 } from "lucide-react"
+import { Search, Plus, Edit2, Printer } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
+import { buildStockLevelsHtml, printReceiptHtml } from "@/lib/receipt"
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
 import ProductDialog from "@/pages/warehouse/ProductDialog"
@@ -161,6 +162,16 @@ export default function ManageProducts() {
         setCurrentPage(1)
     }, [searchTerm])
 
+    const handlePrint = () => {
+        const rows = products.map((product) => ({
+            skuCode: product.code_name || 'N/A',
+            productName: product.sku_name,
+            quantity: product.quantity,
+            retailPrice: product.retail_price,
+        }))
+        printReceiptHtml(buildStockLevelsHtml(rows), "Current Stock Levels")
+    }
+
     if (loading) {
         return (
             <div className="space-y-6">
@@ -176,10 +187,16 @@ export default function ManageProducts() {
         <div className="space-y-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-3xl font-bold tracking-tight">Manage Products</h2>
-                <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
-                    <Plus className="h-4 w-4" />
-                    Add Product
-                </Button>
+                <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={handlePrint} disabled={loading || products.length === 0} className="gap-2">
+                        <Printer className="h-4 w-4" />
+                        Print Stock Levels
+                    </Button>
+                    <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                        <Plus className="h-4 w-4" />
+                        Add Product
+                    </Button>
+                </div>
             </div>
 
             <div className="relative w-full md:w-72">

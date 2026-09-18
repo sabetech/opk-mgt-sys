@@ -12,6 +12,8 @@ import {
     Truck
 } from "lucide-react"
 import { useNavigate, NavLink, useLocation } from "react-router-dom"
+import { useEffect, useState } from "react"
+import { pb } from "@/lib/pocketbase"
 import { Button } from "@/components/ui/button"
 import {
     Collapsible,
@@ -39,6 +41,26 @@ export function AppSidebar({ className }: SidebarProps) {
     const location = useLocation();
     const navigate = useNavigate();
     const { profile, loading, signOut } = useAuth();
+    const [pendingAdjustCount, setPendingAdjustCount] = useState(0);
+
+    useEffect(() => {
+        if (profile?.role !== "admin") {
+            setPendingAdjustCount(0)
+            return
+        }
+        let cancelled = false
+        pb.collection("stock_adjustment_requests")
+            .getList(1, 1, { filter: 'status = "pending"', fields: "id", $autoCancel: false })
+            .then((res) => {
+                if (!cancelled) setPendingAdjustCount(res.totalItems ?? 0)
+            })
+            .catch(() => {
+                // collection may not exist yet (pre-migration) — ignore
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [profile?.role, location.pathname]);
 
     const handleLogout = async () => {
         try {
@@ -74,7 +96,7 @@ export function AppSidebar({ className }: SidebarProps) {
             title: "Warehouse",
             icon: Warehouse,
             href: "/dashboard/warehouse",
-            roles: ["admin", "auditor"],
+            roles: ["admin", "auditor", "operations_manager", "warehouse_manager"],
             children: [
                 { title: "Products", href: "/dashboard/warehouse/products", roles: ["admin", "auditor"] },
                 { title: "Pending Orders", href: "/dashboard/warehouse/pending-orders", roles: ["admin", "auditor"] },
@@ -83,24 +105,27 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Inventory Log", href: "/dashboard/warehouse/inventory-log", roles: ["admin", "auditor"] },
                 { title: "Add Loadout", href: "/dashboard/warehouse/add-loadout", roles: ["admin"] },
                 { title: "Loadout", href: "/dashboard/warehouse/loadout", roles: ["admin", "auditor"] },
-                { title: "Take Stock", href: "/dashboard/warehouse/take-stock", roles: ["admin"] },
-                { title: "Breakages", href: "/dashboard/warehouse/breakages", roles: ["admin"] },
-                { title: "Stock Reports", href: "/dashboard/warehouse/stock-reports", roles: ["admin", "auditor"] },
+                { title: "Take Stock", href: "/dashboard/warehouse/take-stock", roles: ["admin", "operations_manager", "warehouse_manager"] },
+                { title: "Breakages", href: "/dashboard/warehouse/breakages", roles: ["admin", "operations_manager", "warehouse_manager"] },
+                { title: "Stock Reports", href: "/dashboard/warehouse/stock-reports", roles: ["admin", "auditor", "operations_manager", "warehouse_manager"] },
             ],
         },
         {
             title: "Operations",
             icon: Truck,
             href: "/dashboard/operations",
-            roles: ["admin", "operations_manager", "auditor"],
+            roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "sales_manager"],
             children: [
-                { title: "Overview", href: "/dashboard/operations", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Overview", href: "/dashboard/operations", roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "sales_manager"] },
                 { title: "Stocks Coming In", href: "/dashboard/operations/stocks-coming-in", roles: ["admin", "operations_manager", "auditor"] },
                 { title: "Reload Truck with Empties", href: "/dashboard/operations/reload-truck-empties", roles: ["admin", "operations_manager"] },
-                { title: "Adjustments", href: "/dashboard/operations/adjustments", roles: ["admin", "operations_manager"] },
+                { title: "Adjustments", href: "/dashboard/operations/adjustments", roles: ["admin", "operations_manager", "warehouse_manager"] },
+                { title: "Adjustment Requests", href: "/dashboard/operations/adjustment-requests", roles: ["admin", "operations_manager", "warehouse_manager", "auditor"] },
                 { title: "Stocks Coming In Log", href: "/dashboard/operations/stocks-coming-in-log", roles: ["admin", "operations_manager", "auditor"] },
                 { title: "Truck Reloads to GGBL", href: "/dashboard/operations/truck-reloads-to-ggbl", roles: ["admin", "operations_manager", "auditor"] },
-                { title: "Adjustments Log", href: "/dashboard/operations/adjustments-log", roles: ["admin", "operations_manager", "auditor"] },
+                { title: "Adjustments Log", href: "/dashboard/operations/adjustments-log", roles: ["admin", "operations_manager", "auditor", "sales_manager"] },
+                { title: "Take Empties Count", href: "/dashboard/operations/empties-count", roles: ["admin", "operations_manager", "warehouse_manager", "empties_manager"] },
+                { title: "Empties Count Reports", href: "/dashboard/operations/empties-count-reports", roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "empties_manager"] },
                 { title: "Setup", href: "/dashboard/operations/setup", roles: ["admin", "operations_manager"] },
             ],
         },
@@ -133,6 +158,7 @@ export function AppSidebar({ className }: SidebarProps) {
             children: [
                 { title: "Add User", href: "/dashboard/admin/add-user", roles: ["admin"] },
                 { title: "Settings", href: "/dashboard/admin/settings", roles: ["admin"] },
+                { title: "Stock Adjustment Requests", href: "/dashboard/admin/stock-adjustment-requests", roles: ["admin"] },
             ],
         },
     ]
@@ -216,7 +242,12 @@ export function AppSidebar({ className }: SidebarProps) {
                                                         )
                                                     }
                                                 >
-                                                    {child.title}
+                                                    <span className="flex-1">{child.title}</span>
+                                                    {child.href === "/dashboard/admin/stock-adjustment-requests" && pendingAdjustCount > 0 && (
+                                                        <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-600 px-1.5 text-[10px] font-bold text-white">
+                                                            {pendingAdjustCount > 99 ? "99+" : pendingAdjustCount}
+                                                        </span>
+                                                    )}
                                                 </NavLink>
                                             ))}
                                         </div>

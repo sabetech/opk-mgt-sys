@@ -18,6 +18,9 @@ import {
 } from "@/components/ui/dialog"
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { validateProductForm } from "@/lib/productUtils"
+import { checkProductDuplicates, type DuplicateWarning } from "@/lib/productDedupe"
+import { TriangleAlert } from "lucide-react"
+import { pb } from "@/lib/pocketbase"
 
 interface ProductDialogProps {
     open: boolean
@@ -36,6 +39,9 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
         returnable: false
     })
     const [errors, setErrors] = useState<Record<string, string>>({})
+    // Warn-only duplicate/quality checks (never auto-merges)
+    const [catalog, setCatalog] = useState<{ id: string; sku_name: string; code_name: string | null }[]>([])
+    const [warnings, setWarnings] = useState<DuplicateWarning[]>([])
 
     // Reset form when dialog opens/closes
     useEffect(() => {
@@ -62,6 +68,50 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
             setErrors({})
         }
     }, [open, editingProduct])
+
+    // Load catalog for duplicate checks + recompute warnings as the user types
+    useEffect(() => {
+        if (!open) return
+        let cancelled = false
+        pb.collection('products')
+            .getFullList({ filter: 'deleted_at = ""', fields: 'id, sku_name, code_name' })
+            .then((rows) => {
+                if (!cancelled) {
+                    setCatalog(rows.map((r) => ({ id: r.id, sku_name: r.sku_name, code_name: r.code_name ?? null })))
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setCatalog([])
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [open ])
+
+    useEffect(() => {
+        if (!open) {
+            setWarnings([])
+            return
+        }
+        const parsePrice = (v: string): number | null => {
+            const t = v.trim()
+            if (!t) return null
+            const n = parseFloat(t)
+            return isNaN(n) ? null : n
+        }
+        setWarnings(
+            checkProductDuplicates(
+                {
+                    sku_name: formData.sku_name,
+                    code_name: formData.code_name || null,
+                    wholesale_price: parsePrice(formData.wholesale_price),
+                    retail_price: parsePrice(formData.retail_price),
+                },
+                catalog,
+                editingProduct?.id,
+            ),
+        )
+    }, [open, formData, catalog, editingProduct?.id])
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
@@ -97,6 +147,19 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                 </DialogHeader>
                 
                 <form onSubmit={handleSubmit} className="grid gap-4 py-4">
+                    {warnings.length > 0 && (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                            <p className="font-semibold flex items-center gap-1.5">
+                                <TriangleAlert className="h-4 w-4" />
+                                Possible duplicate — please confirm
+                            </p>
+                            <ul className="mt-1 list-disc pl-5 space-y-0.5">
+                                {warnings.map((w, i) => (
+                                    <li key={`${w.kind}-${i}`}>{w.message}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                     <div className="grid gap-2">
                         <Label htmlFor="sku_name">Product Name *</Label>
                         <Input

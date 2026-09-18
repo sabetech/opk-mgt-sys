@@ -27,6 +27,14 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select"
+import { Checkbox } from "@/components/ui/checkbox"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
@@ -37,6 +45,16 @@ interface Customer {
     customer_types: {
         name: string
     } | null
+}
+
+interface HeldDeposit {
+    id: string
+    quantity: number
+    refunded_qty: number
+    amount_per_crate: number
+    total_amount: number
+    status: string
+    created: string
 }
 
 export default function CustomerReturnEmpties() {
@@ -51,6 +69,55 @@ export default function CustomerReturnEmpties() {
     const [returnItems, setReturnItems] = useState<SelectedItem[]>([])
 
     const [loadingCustomers, setLoadingCustomers] = useState(true)
+
+    // Held crate deposits for the selected customer (refundable cash-out, FIFO)
+    const [heldDeposits, setHeldDeposits] = useState<HeldDeposit[]>([])
+    const [refundMethod, setRefundMethod] = useState<string>("cash")
+    const [applyRefund, setApplyRefund] = useState(true)
+
+    // Fetch held deposits whenever the customer changes
+    useEffect(() => {
+        async function fetchHeldDeposits() {
+            if (!selectedCustomer) {
+                setHeldDeposits([])
+                return
+            }
+            try {
+                const data = await pb.collection('crate_deposits').getFullList({
+                    filter: `customer_id = "${selectedCustomer}" && (status = "held" || status = "partial")`,
+                    sort: 'created',
+                })
+                setHeldDeposits(data.map((d) => ({
+                    id: d.id,
+                    quantity: d.quantity || 0,
+                    refunded_qty: d.refunded_qty || 0,
+                    amount_per_crate: d.amount_per_crate || 0,
+                    total_amount: d.total_amount || 0,
+                    status: d.status,
+                    created: d.created,
+                })))
+            } catch {
+                // Collection may not exist yet on older DBs — no refundable deposits
+                setHeldDeposits([])
+            }
+        }
+        fetchHeldDeposits()
+    }, [selectedCustomer])
+
+    const heldCrates = heldDeposits.reduce((sum, d) => sum + Math.max(0, d.quantity - d.refunded_qty), 0)
+    const heldTotal = heldDeposits.reduce((sum, d) => sum + Math.max(0, d.quantity - d.refunded_qty) * (d.amount_per_crate || 0), 0)
+    const returnQty = returnItems.reduce((sum, item) => sum + item.quantity, 0)
+    const refundQty = applyRefund ? Math.min(returnQty, heldCrates) : 0
+    // Preview of the FIFO cash-out amount (oldest held rows first)
+    let previewRemaining = refundQty
+    let previewRefundAmount = 0
+    for (const dep of heldDeposits) {
+        if (previewRemaining <= 0) break
+        const available = Math.max(0, dep.quantity - dep.refunded_qty)
+        const alloc = Math.min(available, previewRemaining)
+        previewRefundAmount += alloc * (dep.amount_per_crate || 0)
+        previewRemaining -= alloc
+    }
 
     // Fetch Data
     useEffect(() => {
@@ -119,12 +186,50 @@ export default function CustomerReturnEmpties() {
                 })
             }
 
-            toast.success("Return recorded successfully!")
+            // 3. Cash-out refundable crate deposits FIFO, proportional per crate.
+            // Crates are fungible across SKUs, so the oldest held deposit rows
+            // are refunded first at their frozen per-crate amounts.
+            let refundedCrates = 0
+            let refundedAmount = 0
+            let remaining = refundQty
+            if (remaining > 0) {
+                for (const dep of heldDeposits) {
+                    if (remaining <= 0) break
+                    const available = Math.max(0, dep.quantity - dep.refunded_qty)
+                    if (available <= 0) continue
+                    const alloc = Math.min(available, remaining)
+                    const newRefunded = dep.refunded_qty + alloc
+                    const fullyRefunded = newRefunded >= dep.quantity
+                    try {
+                        await pb.collection('crate_deposits').update(dep.id, {
+                            refunded_qty: newRefunded,
+                            status: fullyRefunded ? 'refunded' : 'partial',
+                            ...(fullyRefunded
+                                ? { refunded_at: new Date().toISOString(), refund_log_id: logData.id, refund_method: refundMethod }
+                                : {}),
+                        })
+                        refundedCrates += alloc
+                        refundedAmount += alloc * (dep.amount_per_crate || 0)
+                        remaining -= alloc
+                    } catch (refundError) {
+                        console.error("Failed to refund crate deposit row:", refundError)
+                        break
+                    }
+                }
+            }
+
+            if (refundedCrates > 0) {
+                toast.success(`Return recorded! Refund GH₵ ${refundedAmount.toFixed(2)} in ${refundMethod.replace(/_/g, " ")} for ${refundedCrates} crate(s).`)
+            } else {
+                toast.success("Return recorded successfully!")
+            }
 
             // Reset form
             setSelectedCustomer("")
             setDate(undefined)
             setReturnItems([])
+            setHeldDeposits([])
+            setApplyRefund(true)
         } catch (error: any) {
             console.error("Error saving return:", error)
             toast.error(error.message || "Failed to record return.")
@@ -268,9 +373,52 @@ export default function CustomerReturnEmpties() {
                 </Table>
             </div>
 
+            {/* 5. Crate deposit refund (cash-out on the spot, FIFO) */}
+            {selectedCustomer && heldCrates > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-4 space-y-3 dark:bg-amber-900/20">
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="font-medium">Held crate deposits</span>
+                        <span className="font-bold">{heldCrates} crate(s) · GH₵ {heldTotal.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                        <span className="text-muted-foreground">Refund for this return</span>
+                        <span className="font-bold">
+                            {refundQty} crate(s)
+                            {refundQty > 0 && ` · GH₵ ${previewRefundAmount.toFixed(2)}`}
+                        </span>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                        <Checkbox
+                            checked={applyRefund}
+                            onCheckedChange={(checked) => setApplyRefund(checked === true)}
+                        />
+                        <span>Refund deposit in cash on the spot (FIFO, oldest first)</span>
+                    </label>
+                    {applyRefund && refundQty > 0 && (
+                        <div className="flex items-center gap-3">
+                            <label className="text-sm font-medium">Refund method</label>
+                            <Select value={refundMethod} onValueChange={setRefundMethod}>
+                                <SelectTrigger className="w-[180px] bg-background">
+                                    <SelectValue placeholder="Choose method" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="cash">Cash</SelectItem>
+                                    <SelectItem value="mobile_money">Mobile Money</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    )}
+                    {returnQty > heldCrates && (
+                        <p className="text-xs text-muted-foreground italic">
+                            Returning more crates than held — only {heldCrates} crate(s) will be refunded.
+                        </p>
+                    )}
+                </div>
+            )}
+
             <div className="flex justify-end">
                 <Button size="lg" onClick={handleSubmit} disabled={returnItems.length === 0}>
-                    Save Return Record
+                    Save Return Record{refundQty > 0 ? ` + Refund ${refundQty} crate(s)` : ""}
                 </Button>
             </div>
         </div>

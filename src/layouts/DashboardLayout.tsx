@@ -1,5 +1,6 @@
 import { Outlet } from "react-router-dom"
 import { AppSidebar } from "@/components/AppSidebar"
+import PendingApprovalBanner from "@/components/PendingApprovalBanner"
 
 export default function DashboardLayout() {
     return (
@@ -9,6 +10,7 @@ export default function DashboardLayout() {
                 {/* Mobile header spacer if needed, or put global search/header here */}
                 {/* For now, just the content */}
                 <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 pt-16 md:pt-6">
+                    <PendingApprovalBanner />
                     <Outlet />
                 </main>
             </div>

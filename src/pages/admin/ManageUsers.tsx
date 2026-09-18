@@ -133,6 +133,7 @@ export default function ManageUsers() {
         switch (role) {
             case 'admin': return 'bg-red-100 text-red-800 border-red-200';
             case 'operations_manager': return 'bg-blue-100 text-blue-800 border-blue-200';
+            case 'warehouse_manager': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
             case 'sales_manager': return 'bg-green-100 text-green-800 border-green-200';
             case 'empties_manager': return 'bg-amber-100 text-amber-800 border-amber-200';
             case 'cashier': return 'bg-purple-100 text-purple-800 border-purple-200';
@@ -295,6 +296,7 @@ export default function ManageUsers() {
                                     <SelectItem value="admin">Admin</SelectItem>
                                     <SelectItem value="empties_manager">Empties Manager</SelectItem>
                                     <SelectItem value="operations_manager">Operations Manager</SelectItem>
+                                    <SelectItem value="warehouse_manager">Warehouse Manager</SelectItem>
                                     <SelectItem value="sales_manager">Sales Manager</SelectItem>
                                     <SelectItem value="cashier">Cashier</SelectItem>
                                     <SelectItem value="auditor">Auditor</SelectItem>

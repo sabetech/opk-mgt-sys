@@ -22,6 +22,7 @@ import {
   RotateCcw,
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
+import { suggestProduct } from "@/lib/productSearch"
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "sonner"
 import Papa from "papaparse"
@@ -46,6 +47,7 @@ interface ParsedRow {
   rowNumber: number
   matched: boolean
   productId: string | null
+  suggestion?: string | null
   error?: string
 }
 
@@ -199,7 +201,12 @@ export default function Setup() {
           return { sku_name: skuName.trim(), quantity, rowNumber: index + 2, matched: true, productId }
         }
 
-        return { sku_name: skuName.trim(), quantity, rowNumber: index + 2, matched: false, productId: null, error: "Product not found - will be created" }
+        // Typo-tolerant hint only — row still creates a new product unless staff fixes the CSV.
+        const suggestion = suggestProduct(
+          allProducts.map((p) => ({ id: p.id, sku_name: p.sku_name, code_name: (p as any).code_name ?? null })),
+          skuName.trim(),
+        )
+        return { sku_name: skuName.trim(), quantity, rowNumber: index + 2, matched: false, productId: null, suggestion: suggestion?.sku_name ?? null, error: "Product not found - will be created" }
       })
       .filter((r) => r.sku_name !== "(empty)")
 
@@ -430,7 +437,12 @@ export default function Setup() {
                   {parsedRows.map((row, i) => (
                     <TableRow key={i}>
                       <TableCell>{row.rowNumber}</TableCell>
-                      <TableCell className="font-medium">{row.sku_name}</TableCell>
+                      <TableCell className="font-medium">
+                        {row.sku_name}
+                        {row.suggestion && (
+                          <p className="text-xs text-amber-700 font-normal">Did you mean “{row.suggestion}”?</p>
+                        )}
+                      </TableCell>
                       <TableCell>{row.quantity}</TableCell>
                       <TableCell>
                         {row.error?.includes("required") || row.error?.includes("Invalid") ? (

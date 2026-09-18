@@ -54,6 +54,8 @@ interface OrderDetail {
     amount_tendered: number
     payment_type: string
     status: 'pending' | 'approved' | 'cancelled'
+    crate_deposit_qty?: number
+    crate_deposit_total?: number
     customers: {
         name: string
         phone: string | null
@@ -452,6 +454,16 @@ export default function OrderDetails() {
                                             GH₵ {order.total_amount.toFixed(2)}
                                         </TableCell>
                                     </TableRow>
+                                    {(order.crate_deposit_qty ?? 0) > 0 && (
+                                        <TableRow className="bg-amber-50/50">
+                                            <TableCell colSpan={3} className="text-right text-xs">
+                                                incl. refundable crate deposit ({order.crate_deposit_qty} crate(s), cash-out on empties return)
+                                            </TableCell>
+                                            <TableCell className="text-right text-sm font-bold">
+                                                GH₵ {(order.crate_deposit_total ?? 0).toFixed(2)}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                 </TableBody>
                             </Table>
                         </CardContent>

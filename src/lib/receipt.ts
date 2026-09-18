@@ -20,6 +20,10 @@ export interface CompletedSale {
     items: ReceiptItem[]
     totalQuantity: number
     grandTotal: number
+    /** Refundable crate deposit (cash-out when empties are returned) */
+    crateDepositQty?: number
+    crateDepositTotal?: number
+    crateDepositUnitAmount?: number
 }
 
 function escapeHtml(value: string): string {
@@ -103,9 +107,62 @@ ${sale.servedBy ? `<div class="meta"><span>Served by:</span><span>${escapeHtml(s
 <table><tbody>${itemRows}</tbody></table>
 <div class="divider"></div>
 <div class="totals"><span>Total Qty:</span><span>${sale.totalQuantity}</span></div>
+${(sale.crateDepositQty ?? 0) > 0 ? `<div class="totals"><span>Crate deposit (${sale.crateDepositQty} x ${formatMoney(sale.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(sale.crateDepositTotal ?? 0)}</span></div><div class="muted center">Refundable in cash when empties are returned</div>` : ""}
 <div class="totals grand"><span>TOTAL:</span><span>GHc ${formatMoney(sale.grandTotal)}</span></div>
 <div class="divider"></div>
 <div class="center">Thank you for your patronage!</div>
+</body></html>`
+}
+
+export interface StockLevelRow {
+    skuCode: string
+    productName: string
+    quantity: number
+    retailPrice: number | null
+}
+
+/**
+ * Builds a standalone A4 HTML document listing current stock levels.
+ * Columns: SKU Code | Product Name | Stock Level | Retail Price.
+ */
+export function buildStockLevelsHtml(rows: StockLevelRow[], generatedAt: Date = new Date()): string {
+    const sorted = [...rows].sort((a, b) => a.productName.localeCompare(b.productName))
+    const bodyRows = sorted
+        .map(
+            (row, index) => `<tr>
+                <td class="center">${index + 1}</td>
+                <td>${escapeHtml(row.skuCode)}</td>
+                <td>${escapeHtml(row.productName)}</td>
+                <td class="right">${row.quantity}</td>
+                <td class="right">GHc ${formatMoney(row.retailPrice ?? 0)}</td>
+            </tr>`
+        )
+        .join("")
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Current Stock Levels</title>
+<style>
+@page { size: A4; margin: 12mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 0; }
+h2 { margin: 0 0 4px; font-size: 18px; }
+.company { font-size: 15px; font-weight: bold; }
+.subtitle { color: #444; margin-bottom: 16px; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
+th { background: #f0f0f0; font-weight: bold; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+.right { text-align: right; }
+.center { text-align: center; }
+.total { margin-top: 10px; font-weight: bold; }
+@media print { body { margin: 0; } }
+</style></head><body>
+<div class="company">OPPONG KYEKYEKU DISTRIBUTION LTD</div>
+<h2>Current Stock Levels</h2>
+<div class="subtitle">Generated: ${formatDateTime(generatedAt)} | Items: ${sorted.length}</div>
+<table><thead><tr>
+<th class="center">#</th><th>SKU Code</th><th>Product Name</th><th class="right">Stock Level</th><th class="right">Retail Price</th>
+</tr></thead><tbody>${bodyRows || `<tr><td colspan="5" class="center">No products found.</td></tr>`}</tbody></table>
 </body></html>`
 }
 

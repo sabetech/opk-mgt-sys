@@ -16,6 +16,7 @@ import { pb } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import { generateOrderNumber } from "@/lib/orderNumber"
 import { buildSaleReceiptHtml, printReceiptHtml, type CompletedSale } from "@/lib/receipt"
+import { suggestProduct } from "@/lib/productSearch"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -100,11 +101,16 @@ export default function Sale() {
     // UI helpers
     const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false)
     const [productPopoverOpen, setProductPopoverOpen] = useState(false)
+    const [productSearchQuery, setProductSearchQuery] = useState("")
     const [addCustomerOpen, setAddCustomerOpen] = useState(false)
 
     // Wholesale surcharge
     const [surchargeConfig, setSurchargeConfig] = useState<{ amount: number; product_ids: string[] }>({ amount: 0, product_ids: [] })
     const [applySurcharge, setApplySurcharge] = useState(false)
+
+    // Refundable crate deposit (per crate, covers empties shortfall only)
+    const [depositConfig, setDepositConfig] = useState<{ amount: number }>({ amount: 200 })
+    const [applyDeposit, setApplyDeposit] = useState(true)
 
     // Fetch customers (reusable for refresh after add)
     const fetchCustomers = async () => {
@@ -171,6 +177,16 @@ export default function Sale() {
                     console.error("Failed to load surcharge settings:", err)
                 }
 
+                // Fetch crate deposit settings (defaults to 200 GHc/crate)
+                try {
+                    const depositRecord = await pb.collection('app_settings').getFirstListItem('key = "crate_deposit"')
+                    const raw = depositRecord.value
+                    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+                    if (parsed && typeof parsed.amount === 'number') setDepositConfig({ amount: parsed.amount })
+                } catch (err) {
+                    console.error("Failed to load crate deposit settings:", err)
+                }
+
             } catch (err) {
                 console.error("Error fetching initial data:", err)
             }
@@ -235,6 +251,7 @@ export default function Sale() {
         setSelectedProduct(null)
         setQuantity(1)
         setApplySurcharge(false)
+        setProductSearchQuery("")
     }
 
     const removeFromCart = (id: string) => {
@@ -242,7 +259,7 @@ export default function Sale() {
     }
 
     const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0)
-    const grandTotal = cart.reduce((sum, item) => sum + item.total, 0)
+    const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0)
 
     // Calculate required empties for the cart
     const itemsInCart = cart.map(item => ({
@@ -256,7 +273,15 @@ export default function Sale() {
 
     const currentBalance = selectedCustomer?.balance || 0
     const projectedBalance = currentBalance - requiredEmpties
-    const isBalanceInsufficient = !selectedCustomer?.has_mou && projectedBalance < 0
+    // MOU customers keep the current "go negative free" path and are never
+    // offered a deposit. Non-MOU customers with a shortfall must cover it
+    // with a refundable per-crate deposit instead of submitting empties.
+    const emptiesShortfall = !selectedCustomer?.has_mou ? Math.max(0, -projectedBalance) : 0
+    const depositApplicable = emptiesShortfall > 0 && depositConfig.amount > 0
+    const depositQty = depositApplicable && applyDeposit ? emptiesShortfall : 0
+    const depositTotal = depositQty * depositConfig.amount
+    const grandTotal = cartSubtotal + depositTotal
+    const isBalanceInsufficient = emptiesShortfall > 0 && depositQty < emptiesShortfall
 
     const [processing, setProcessing] = useState(false)
     const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
@@ -281,6 +306,10 @@ export default function Sale() {
             toast.error("Cart is empty.")
             return
         }
+        if (emptiesShortfall > 0 && depositQty < emptiesShortfall) {
+            toast.error("Insufficient empties. Charge the crate deposit or remove returnable items.")
+            return
+        }
 
         const returnableItems = cart.filter(item => {
             const product = products.find(p => p.id === item.productId)
@@ -292,14 +321,18 @@ export default function Sale() {
             if (returnableItems.length > 0) {
                 const totalQuantity = returnableItems.reduce((sum, item) => sum + item.quantity, 0)
 
-                // 1. Insert into empties_log
+                // 1. Insert into empties_log (full movement kept so crate debt
+                // is tracked; deposit_* flags let the balance hook allow the
+                // shortfall portion instead of rejecting it)
                 let logData: any
                 try {
                     logData = await pb.collection('empties_log').create({
                         date: new Date().toISOString(),
                         customer_id: selectedCustomer.id,
                         activity: 'customer_purchase',
-                        total_quantity: totalQuantity
+                        total_quantity: totalQuantity,
+                        deposit_qty: depositQty,
+                        deposit_total: depositTotal,
                     })
                 } catch (logError: any) {
                     const msg = logError.response?.data?.message || logError.message || ''
@@ -328,7 +361,8 @@ export default function Sale() {
             // Generate sequential order number
             const orderNumber = await generateOrderNumber()
 
-            // Insert into orders header
+            // Insert into orders header (deposit frozen per order so later
+            // Settings changes never rewrite history)
             const orderData = await pb.collection('orders').create({
                 customer_id: selectedCustomer.id,
                 order_number: orderNumber,
@@ -338,7 +372,29 @@ export default function Sale() {
                 status: 'pending',
                 date_time: new Date().toISOString(),
                 created_by: profile?.id || '',
+                crate_deposit_qty: depositQty,
+                crate_deposit_total: depositTotal,
             })
+
+            // Held deposit ledger (one row per order; refunded FIFO on return)
+            if (depositQty > 0) {
+                try {
+                    await pb.collection('crate_deposits').create({
+                        customer_id: selectedCustomer.id,
+                        order_id: orderData.id,
+                        quantity: depositQty,
+                        amount_per_crate: depositConfig.amount,
+                        total_amount: depositTotal,
+                        refunded_qty: 0,
+                        status: 'held',
+                        created: new Date().toISOString(),
+                        handled_by: profile?.id || '',
+                    })
+                } catch (depositError) {
+                    console.error("Failed to record crate deposit (sale completed):", depositError)
+                    toast.warning("Sale saved, but the crate deposit ledger entry failed — reconcile manually.")
+                }
+            }
 
             // Insert into sales (order items)
             const salesToInsert = cart.map(item => ({
@@ -372,10 +428,14 @@ export default function Sale() {
                 })),
                 totalQuantity,
                 grandTotal,
+                crateDepositQty: depositQty,
+                crateDepositTotal: depositTotal,
+                crateDepositUnitAmount: depositConfig.amount,
             })
             setSuccessOpen(true)
             setCart([])
             setSelectedCustomer(null)
+            setApplyDeposit(true)
         } catch (error: any) {
             console.error("Error processing sale:", error)
             toast.error(error.message || "Failed to process sale.")
@@ -495,9 +555,31 @@ export default function Sale() {
                                         </PopoverTrigger>
                                         <PopoverContent className="w-[300px] p-0">
                                             <Command>
-                                                <CommandInput placeholder="Search product..." />
+                                                <CommandInput placeholder="Search product..." value={productSearchQuery} onValueChange={setProductSearchQuery} />
                                                 <CommandList>
-                                                    <CommandEmpty>No product found.</CommandEmpty>
+                                                    <CommandEmpty>
+                                                        {(() => {
+                                                            const suggestion = suggestProduct(products, productSearchQuery)
+                                                            const inStock = suggestion
+                                                                ? (products.find((p) => p.id === suggestion.id)?.quantity ?? 0)
+                                                                : 0
+                                                            return suggestion && inStock > 0 ? (
+                                                                <button
+                                                                    type="button"
+                                                                    className="px-3 py-2 text-sm text-left w-full hover:bg-muted/50"
+                                                                    onClick={() => {
+                                                                        setSelectedProduct(products.find((p) => p.id === suggestion.id) ?? null)
+                                                                        setProductSearchQuery("")
+                                                                        setProductPopoverOpen(false)
+                                                                    }}
+                                                                >
+                                                                    No exact match. Did you mean <strong>{suggestion.sku_name}</strong>?
+                                                                </button>
+                                                            ) : (
+                                                <span className="px-3 py-2 text-sm text-muted-foreground">No product found.</span>
+                                                            )
+                                                        })()}
+                                                    </CommandEmpty>
                                                     <CommandGroup>
                                                         {products.map((p) => (
                                                             <CommandItem
@@ -506,6 +588,7 @@ export default function Sale() {
                                                                 onSelect={() => {
                                                                     if (p.quantity <= 0) return
                                                                     setSelectedProduct(p)
+                                                                    setProductSearchQuery("")
                                                                     setProductPopoverOpen(false)
                                                                 }}
                                                                 className={p.quantity <= 0 ? "opacity-50 pointer-events-none" : ""}
@@ -686,8 +769,32 @@ export default function Sale() {
                                         </div>
                                         {isBalanceInsufficient && (
                                             <p className="text-[10px] text-red-600 font-bold text-center leading-tight">
-                                                Insufficient empties. Customer requires an MOU to go negative.
+                                                Insufficient empties. Charge the crate deposit below to proceed.
                                             </p>
+                                        )}
+                                        {/* Crate deposit (non-MOU shortfall only) */}
+                                        {depositApplicable && (
+                                            <div className="space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 dark:bg-amber-900/20">
+                                                <div className="flex justify-between items-center text-sm">
+                                                    <span className="font-medium">Missing crates</span>
+                                                    <span className="font-bold">{emptiesShortfall}</span>
+                                                </div>
+                                                <div className="flex justify-between items-center text-sm">
+                                                    <span className="text-muted-foreground">Deposit ({emptiesShortfall} × GH₵ {depositConfig.amount.toFixed(2)})</span>
+                                                    <span className="font-bold">GH₵ {depositTotal.toFixed(2)}</span>
+                                                </div>
+                                                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
+                                                    <Checkbox
+                                                        id="crate-deposit"
+                                                        checked={applyDeposit}
+                                                        onCheckedChange={(checked) => setApplyDeposit(checked === true)}
+                                                    />
+                                                    <span>Charge refundable crate deposit</span>
+                                                </label>
+                                                <p className="text-[10px] text-muted-foreground italic leading-tight">
+                                                    Refundable in cash when empties are returned.
+                                                </p>
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -696,6 +803,11 @@ export default function Sale() {
                             {/* Total Price Section */}
                             <div className="space-y-2">
                                 <span className="text-sm font-semibold text-muted-foreground uppercase block text-center">Grand Total</span>
+                                {depositTotal > 0 && (
+                                    <div className="text-center text-sm text-muted-foreground">
+                                        Items GH₵ {cartSubtotal.toFixed(2)} + Deposit GH₵ {depositTotal.toFixed(2)}
+                                    </div>
+                                )}
                                 <div className="text-4xl font-black text-center text-amber-900 dark:text-amber-100 py-2">
                                     GH₵ {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </div>
@@ -806,6 +918,15 @@ export default function Sale() {
                                     </div>
                                 ))}
                                 <div className="my-2 border-t border-dashed border-black" />
+                                {(completedSale.crateDepositQty ?? 0) > 0 && (
+                                    <>
+                                        <p className="flex justify-between">
+                                            <span>Crate deposit ({completedSale.crateDepositQty} x {(completedSale.crateDepositUnitAmount ?? 0).toFixed(2)})</span>
+                                            <span>{(completedSale.crateDepositTotal ?? 0).toFixed(2)}</span>
+                                        </p>
+                                        <p className="text-center italic">Refundable in cash when empties are returned</p>
+                                    </>
+                                )}
                                 <p className="flex justify-between font-bold">
                                     <span>TOTAL:</span>
                                     <span>GH₵ {completedSale.grandTotal.toFixed(2)}</span>

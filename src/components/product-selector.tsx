@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { Check, ChevronsUpDown, Plus } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { suggestProduct } from "@/lib/productSearch"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -54,6 +55,7 @@ export function ProductSelector({
     const [openProduct, setOpenProduct] = useState(false)
     const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
     const [quantity, setQuantity] = useState<string>("1")
+    const [query, setQuery] = useState("")
 
     // Filter products based on condition and already selected items
     const selectedProductIds = new Set(selectedItems.map(item => item.productId))
@@ -82,6 +84,7 @@ export function ProductSelector({
         // Reset inputs
         setSelectedProduct(null)
         setQuantity("1")
+        setQuery("")
     }
 
     return (
@@ -107,9 +110,32 @@ export function ProductSelector({
                         </PopoverTrigger>
                         <PopoverContent className="w-[400px] p-0">
                             <Command>
-                                <CommandInput placeholder="Search product..." />
+                                <CommandInput placeholder="Search product..." value={query} onValueChange={setQuery} />
                                 <CommandList>
-                                    <CommandEmpty>No product found.</CommandEmpty>
+                                    <CommandEmpty>
+                                        {(() => {
+                                            const suggestion = suggestProduct(
+                                                products.map((p) => ({ id: p.id, sku_name: p.name, code_name: p.code ?? null })),
+                                                query,
+                                            )
+                                            const match = suggestion ? products.find((p) => p.id === suggestion.id) : undefined
+                                            return match ? (
+                                                <button
+                                                    type="button"
+                                                    className="px-3 py-2 text-sm text-left w-full hover:bg-muted/50"
+                                                    onClick={() => {
+                                                        setSelectedProduct(match.id)
+                                                        setQuery("")
+                                                        setOpenProduct(false)
+                                                    }}
+                                                >
+                                                    No exact match. Did you mean <strong>{match.name}</strong>?
+                                                </button>
+                                            ) : (
+                                                <span className="px-3 py-2 text-sm text-muted-foreground">No product found.</span>
+                                            )
+                                        })()}
+                                    </CommandEmpty>
                                     <CommandGroup>
                                         {availableProducts.map((product) => (
                                             <CommandItem

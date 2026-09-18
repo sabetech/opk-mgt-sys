@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Calendar as CalendarIcon, Package, ArrowUp, ArrowDown, Truck, Loader2, RotateCcw } from "lucide-react"
+import { Calendar as CalendarIcon, Package, ArrowUp, ArrowDown, Truck, Loader2, RotateCcw, Users, Package2, Boxes, Layers } from "lucide-react"
 import { format } from "date-fns"
 import { useNavigate } from "react-router-dom"
 
@@ -12,6 +12,14 @@ import {
 } from "@/components/ui/popover"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Calendar } from "@/components/ui/calendar"
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table"
 import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 
@@ -24,6 +32,15 @@ interface OverviewStats {
     adjustmentsUpCount: number
     adjustmentsDownToday: number
     adjustmentsDownCount: number
+}
+
+interface EmptiesRow {
+    id: string
+    skuName: string
+    codeName: string | null
+    fulls: number
+    onGround: number
+    inTrade: number
 }
 
 export default function OperationsOverview() {
@@ -41,6 +58,72 @@ export default function OperationsOverview() {
     const [loading, setLoading] = useState(true)
     const [selectedDate, setSelectedDate] = useState<Date>(new Date())
     const [calendarOpen, setCalendarOpen] = useState(false)
+
+    // Live empties snapshot (date-independent): returnable crates only.
+    // In Trade = with customers (not yet returned), On Ground = empty crates
+    // on premises, Fulls = returnable products not empty (warehouse_stock).
+    const [emptiesLoading, setEmptiesLoading] = useState(true)
+    const [emptiesRows, setEmptiesRows] = useState<EmptiesRow[]>([])
+
+    const fetchEmptiesSnapshot = async () => {
+        setEmptiesLoading(true)
+        try {
+            const returnable = await pb.collection("products").getFullList({
+                filter: 'returnable = true',
+                sort: 'sku_name',
+                fields: "id, sku_name, code_name",
+                $autoCancel: false,
+            })
+            const productIds = returnable.map((p) => p.id)
+
+            const [emptiesData, stockData] = await Promise.all([
+                pb.collection("empties").getFullList({
+                    fields: "product_id, quantity_in_trade, quantity_on_ground",
+                    $autoCancel: false,
+                }),
+                productIds.length > 0
+                    ? pb.collection("warehouse_stock").getFullList({
+                        filter: `product_id in ("${productIds.join('","')}")`,
+                        fields: "product_id, quantity",
+                        $autoCancel: false,
+                    })
+                    : Promise.resolve([] as any[]),
+            ])
+
+            const tradeByProduct: Record<string, number> = {}
+            const groundByProduct: Record<string, number> = {}
+            for (const e of emptiesData) {
+                const pid = (e as any).product_id
+                if (!pid) continue
+                tradeByProduct[pid] = ((e as any).quantity_in_trade as number) || 0
+                groundByProduct[pid] = ((e as any).quantity_on_ground as number) || 0
+            }
+            const stockByProduct: Record<string, number> = {}
+            for (const s of stockData) {
+                const pid = (s as any).product_id
+                if (!pid) continue
+                stockByProduct[pid] = ((s as any).quantity as number) || 0
+            }
+
+            setEmptiesRows(
+                returnable.map((p: any) => ({
+                    id: p.id,
+                    skuName: p.sku_name,
+                    codeName: p.code_name ?? null,
+                    fulls: stockByProduct[p.id] || 0,
+                    onGround: groundByProduct[p.id] || 0,
+                    inTrade: tradeByProduct[p.id] || 0,
+                }))
+            )
+        } catch (error: any) {
+            // Don't toast here: the date-filtered stats have their own error
+            // path, and an empty snapshot (zeros) is a safe fallback.
+            console.error("Error fetching empties snapshot:", error)
+            setEmptiesRows([])
+        } finally {
+            setEmptiesLoading(false)
+        }
+    }
 
     const fetchData = async () => {
         setLoading(true)
@@ -119,6 +202,15 @@ export default function OperationsOverview() {
         fetchData()
     }, [selectedDate])
 
+    useEffect(() => {
+        fetchEmptiesSnapshot()
+    }, [])
+
+    const emptiesInTrade = emptiesRows.reduce((sum, r) => sum + r.inTrade, 0)
+    const emptiesOnGround = emptiesRows.reduce((sum, r) => sum + r.onGround, 0)
+    const fulls = emptiesRows.reduce((sum, r) => sum + r.fulls, 0)
+    const totalEmpties = fulls + emptiesOnGround + emptiesInTrade
+
     const quickActions = [
         {
             title: "Stocks Coming In",
@@ -152,6 +244,157 @@ export default function OperationsOverview() {
                 <p className="text-muted-foreground">
                     Summary of today's operations activity
                 </p>
+            </div>
+
+            {/* Empties Position (live snapshot, returnables only) */}
+            <div className="space-y-4">
+                <div>
+                    <h3 className="text-xl font-semibold">Empties Position</h3>
+                    <p className="text-sm text-muted-foreground">
+                        Live snapshot across returnable products — not affected by the date filter.
+                    </p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Empties in Trade
+                            </CardTitle>
+                            <Users className="h-4 w-4 text-purple-600" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-purple-600">
+                                {emptiesLoading ? (
+                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                ) : (
+                                    emptiesInTrade.toLocaleString()
+                                )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                With customers, not yet returned
+                            </p>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Empties on Ground
+                            </CardTitle>
+                            <Package2 className="h-4 w-4 text-amber-600" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-amber-600">
+                                {emptiesLoading ? (
+                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                ) : (
+                                    emptiesOnGround.toLocaleString()
+                                )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Empty crates on premises
+                            </p>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Fulls
+                            </CardTitle>
+                            <Boxes className="h-4 w-4 text-green-600" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold text-green-600">
+                                {emptiesLoading ? (
+                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                ) : (
+                                    fulls.toLocaleString()
+                                )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Returnable products, not empty
+                            </p>
+                        </CardContent>
+                    </Card>
+
+                    <Card className="bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                                Total Empties
+                            </CardTitle>
+                            <Layers className="h-4 w-4 text-amber-600" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-2xl font-bold">
+                                {emptiesLoading ? (
+                                    <Loader2 className="h-6 w-6 animate-spin" />
+                                ) : (
+                                    totalEmpties.toLocaleString()
+                                )}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                                Fulls + On Ground + In Trade
+                            </p>
+                        </CardContent>
+                    </Card>
+                </div>
+
+                <Card>
+                    <CardContent className="p-0">
+                        <div className="rounded-md border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow className="bg-muted/50">
+                                        <TableHead>Product</TableHead>
+                                        <TableHead>Code</TableHead>
+                                        <TableHead className="text-right">Fulls</TableHead>
+                                        <TableHead className="text-right">On Ground</TableHead>
+                                        <TableHead className="text-right">In Trade</TableHead>
+                                        <TableHead className="text-right">Total</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {emptiesLoading ? (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="h-24 text-center">
+                                                <Loader2 className="h-6 w-6 animate-spin mx-auto text-muted-foreground" />
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : emptiesRows.length > 0 ? (
+                                        <>
+                                            {emptiesRows.map((row) => (
+                                                <TableRow key={row.id}>
+                                                    <TableCell className="font-medium">{row.skuName}</TableCell>
+                                                    <TableCell className="font-mono text-xs">{row.codeName || "—"}</TableCell>
+                                                    <TableCell className="text-right">{row.fulls.toLocaleString()}</TableCell>
+                                                    <TableCell className="text-right">{row.onGround.toLocaleString()}</TableCell>
+                                                    <TableCell className="text-right">{row.inTrade.toLocaleString()}</TableCell>
+                                                    <TableCell className="text-right font-bold">
+                                                        {(row.fulls + row.onGround + row.inTrade).toLocaleString()}
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))}
+                                            <TableRow className="bg-muted/30 font-bold">
+                                                <TableCell colSpan={2}>Total</TableCell>
+                                                <TableCell className="text-right">{fulls.toLocaleString()}</TableCell>
+                                                <TableCell className="text-right">{emptiesOnGround.toLocaleString()}</TableCell>
+                                                <TableCell className="text-right">{emptiesInTrade.toLocaleString()}</TableCell>
+                                                <TableCell className="text-right">{totalEmpties.toLocaleString()}</TableCell>
+                                            </TableRow>
+                                        </>
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                                                No returnable products found.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
 
             {/* Date Filter */}

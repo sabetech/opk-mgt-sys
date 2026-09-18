@@ -127,6 +127,7 @@ export default function AddUser() {
                                     <SelectItem value="admin">Admin</SelectItem>
                                     <SelectItem value="empties_manager">Empties Manager</SelectItem>
                                     <SelectItem value="operations_manager">Operations Manager</SelectItem>
+                                    <SelectItem value="warehouse_manager">Warehouse Manager</SelectItem>
                                     <SelectItem value="sales_manager">Sales Manager</SelectItem>
                                     <SelectItem value="cashier">Cashier</SelectItem>
                                     <SelectItem value="auditor">Auditor</SelectItem>

@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Loader2, Save, ArrowUp, ArrowDown, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
+import { createAdjustmentRequest, generateAdjustmentId } from "@/lib/adjustments"
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "sonner"
 
@@ -46,15 +48,10 @@ const DECREASE_REASONS = [
     { value: "protocol_request", label: "Protocol Requests" },
 ]
 
-const generateAdjustmentId = () => {
-    const now = new Date()
-    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
-    const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase()
-    return `ADJ-${dateStr}-${randomSuffix}`
-}
-
 export default function Adjustments() {
     const { profile } = useAuth()
+    const [searchParams] = useSearchParams()
+    const prefillApplied = useRef(false)
     const [products, setProducts] = useState<Product[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -73,6 +70,34 @@ export default function Adjustments() {
     useEffect(() => {
         fetchProducts()
     }, [])
+
+    // Prefill from Stock Report "Request fix" links (?direction=&product=&qty=&reason=&notes=)
+    useEffect(() => {
+        if (loading || prefillApplied.current || products.length === 0) return
+        const direction = searchParams.get('direction')
+        const productId = searchParams.get('product')
+        if (direction !== 'increase' && direction !== 'decrease') return
+        if (!productId) return
+        const product = products.find((p) => p.id === productId)
+        if (!product) return
+        prefillApplied.current = true
+        const qty = Math.max(1, parseInt(searchParams.get('qty') || '1', 10) || 1)
+        const reason = searchParams.get('reason') || ''
+        const notes = searchParams.get('notes') || ''
+        setFormData((prev) => ({
+            ...prev,
+            direction,
+            reason,
+            notes,
+            items: [{
+                id: crypto.randomUUID(),
+                productId: product.id,
+                productCode: product.code || 'N/A',
+                productName: product.name,
+                quantity: qty,
+            }],
+        }))
+    }, [loading, products, searchParams])
 
     const fetchProducts = async () => {
         try {
@@ -157,52 +182,23 @@ export default function Adjustments() {
 
         setSaving(true)
         try {
-            const adjustedBy = profile.full_name || profile.id
+            const requestedBy = profile.full_name || profile.id
 
-            for (const item of formData.items) {
-                const stockRecord = await pb.collection('warehouse_stock').getFirstListItem(`product_id = "${item.productId}"`, {
-                    fields: 'id, quantity'
-                }).catch((err) => {
-                    if (err?.status === 404) return null
-                    throw err
-                })
-
-                if (formData.direction === "decrease" && stockRecord) {
-                    const currentQty = stockRecord.quantity || 0
-                    if (currentQty < item.quantity) {
-                        toast.error(`Insufficient stock for ${item.productName}. Available: ${currentQty}`)
-                        return
-                    }
-                }
-
-                await pb.collection('inventory_logs').create({
-                    product_id: item.productId,
-                    type: formData.direction === "increase" ? "adjustment_increase" : "adjustment_decrease",
+            await createAdjustmentRequest({
+                date: formData.date,
+                direction: formData.direction,
+                reason: formData.reason,
+                reference: formData.reference,
+                notes: formData.notes,
+                items: formData.items.map((item) => ({
+                    productId: item.productId,
                     quantity: item.quantity,
-                    reason: formData.reason,
-                    reference: formData.reference || null,
-                    notes: formData.notes || null,
-                    date: formData.date,
-                    adjusted_by: adjustedBy
-                })
+                })),
+                requestedBy,
+                requestedById: profile.id,
+            })
 
-                if (stockRecord) {
-                    const newQty = formData.direction === "increase"
-                        ? (stockRecord.quantity || 0) + item.quantity
-                        : (stockRecord.quantity || 0) - item.quantity
-                    
-                    await pb.collection('warehouse_stock').update(stockRecord.id, {
-                        quantity: Math.max(0, newQty)
-                    })
-                } else if (formData.direction === "increase") {
-                    await pb.collection('warehouse_stock').create({
-                        product_id: item.productId,
-                        quantity: item.quantity
-                    })
-                }
-            }
-
-            toast.success(`Stock ${formData.direction === "increase" ? "increase" : "decrease"} recorded successfully!`)
+            toast.success('Stock adjustment request submitted for admin approval!')
 
             setFormData({
                 date: new Date().toISOString().split('T')[0],
@@ -213,9 +209,9 @@ export default function Adjustments() {
                 items: []
             })
 
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error submitting adjustment:', error)
-            toast.error('Failed to record adjustment')
+            toast.error(error?.message || 'Failed to submit adjustment request')
         } finally {
             setSaving(false)
         }
@@ -243,7 +239,7 @@ export default function Adjustments() {
                 <div>
                     <h2 className="text-3xl font-bold tracking-tight">Adjustments</h2>
                     <p className="text-muted-foreground">
-                        Record stock increases or decreases with reasons
+                        Submit stock increases or decreases for admin approval. Stock only changes after approval.
                     </p>
                 </div>
             </div>
@@ -429,7 +425,7 @@ export default function Adjustments() {
                         disabled={saving || formData.items.length === 0}
                     >
                         {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                        {saving ? "Recording..." : `Record Stock ${formData.direction === "increase" ? "Increase" : "Decrease"}`}
+                        {saving ? "Submitting..." : `Submit Stock ${formData.direction === "increase" ? "Increase" : "Decrease"} Request`}
                     </Button>
                 </div>
             </form>

@@ -48,6 +48,8 @@ import type { RangeKeyDict, Range } from "react-date-range"
 import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { toast } from "sonner"
+import AskData from "@/components/AskData"
+import { buildSalesSummary } from "@/lib/askData"
 
 interface SaleRow {
     id: string
@@ -540,6 +542,9 @@ export default function SalesReport() {
                     <p className="text-2xl font-bold">GH₵ {avgOrderValue.toFixed(2)}</p>
                 </div>
             </div>
+
+            {/* Ask about this report (instant summaries + AI for open questions) */}
+            <AskData summary={buildSalesSummary(filteredRows, formatDateRangeDisplay())} />
 
             {/* Filters */}
             <div className="flex flex-col gap-4 md:flex-row md:items-end">

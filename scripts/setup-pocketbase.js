@@ -364,6 +364,8 @@ async function main() {
         fld('text', 'returned_by'),
         fld('number', 'num_of_pallets'),
         fld('number', 'num_of_pcs'),
+        fld('number', 'deposit_qty'),
+        fld('number', 'deposit_total'),
     ], {}, flags.force);
 
     await ensureCollection('orders', 'base', [
@@ -377,9 +379,29 @@ async function main() {
         fld('date', 'date_time', { required: true }),
         fld('select', 'status', { required: true, values: ['pending', 'approved', 'cancelled'] }),
         fld('date', 'deleted_at'),
+        fld('number', 'crate_deposit_qty'),
+        fld('number', 'crate_deposit_total'),
     ], {}, flags.force);
 
     const { empties_log, orders } = await getCollectionsMap();
+
+    // Refundable crate deposits held per order (cash-out on empties return,
+    // FIFO). amount_per_crate is frozen at sale time so later Settings
+    // changes don't rewrite history.
+    await ensureCollection('crate_deposits', 'base', [
+        fld('relation', 'customer_id', { collectionId: customers.id, maxSelect: 1 }),
+        fld('relation', 'order_id', { collectionId: orders.id, maxSelect: 1 }),
+        fld('number', 'quantity', { required: true }),
+        fld('number', 'amount_per_crate', { required: true }),
+        fld('number', 'total_amount', { required: true }),
+        fld('number', 'refunded_qty'),
+        fld('select', 'status', { required: true, values: ['held', 'partial', 'refunded'] }),
+        fld('date', 'created', { required: true }),
+        fld('date', 'refunded_at'),
+        fld('relation', 'refund_log_id', { collectionId: empties_log.id, maxSelect: 1 }),
+        fld('text', 'refund_method'),
+        fld('text', 'handled_by'),
+    ], {}, flags.force);
 
     await ensureCollection('empties_log_detail', 'base', [
         fld('relation', 'log_id', { collectionId: empties_log.id, required: true, maxSelect: 1, cascadeDelete: true }),
@@ -431,6 +453,120 @@ async function main() {
 
     const { users } = await getCollectionsMap();
 
+    // Stock adjustment approval workflow (request header + line items).
+    // Requests are created as pending and only mutate warehouse_stock /
+    // inventory_logs when an admin approves them.
+    const REQUESTER_RULE = '@request.auth.role = "admin" || @request.auth.role = "operations_manager" || @request.auth.role = "warehouse_manager"';
+    const ADJUST_VIEW_RULE = '@request.auth.role = "admin" || @request.auth.role = "operations_manager" || @request.auth.role = "warehouse_manager" || @request.auth.role = "auditor"';
+
+    await ensureCollection('stock_adjustment_requests', 'base', [
+        fld('date', 'date', { required: true }),
+        fld('text', 'reference', { required: true, unique: true }),
+        fld('select', 'direction', { required: true, values: ['increase', 'decrease'] }),
+        fld('text', 'reason'),
+        fld('text', 'notes'),
+        fld('select', 'status', { required: true, values: ['pending', 'approved', 'rejected'] }),
+        fld('text', 'requested_by', { required: true }),
+        fld('text', 'requested_by_id'),
+        fld('text', 'reviewed_by'),
+        fld('date', 'reviewed_at'),
+        fld('text', 'reject_reason'),
+    ], {
+        listRule: ADJUST_VIEW_RULE,
+        viewRule: ADJUST_VIEW_RULE,
+        createRule: REQUESTER_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
+    const { stock_adjustment_requests } = await getCollectionsMap();
+
+    await ensureCollection('stock_adjustment_items', 'base', [
+        fld('relation', 'request_id', { collectionId: stock_adjustment_requests.id, required: true, maxSelect: 1, cascadeDelete: true }),
+        fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
+        fld('number', 'quantity', { required: true }),
+    ], {
+        listRule: ADJUST_VIEW_RULE,
+        viewRule: ADJUST_VIEW_RULE,
+        createRule: REQUESTER_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
+    // Physical stock-take snapshots. system_qty is frozen at take time so the
+    // Stock Report can compare take-time counts against current warehouse_stock.
+    // warehouse_stock is never mutated by a take; corrections go through the
+    // stock_adjustment_requests approval flow.
+    const TAKE_VIEW_RULE = '@request.auth.role = "admin" || @request.auth.role = "operations_manager" || @request.auth.role = "warehouse_manager" || @request.auth.role = "auditor"';
+    const TAKE_CREATE_RULE = '@request.auth.role = "admin" || @request.auth.role = "operations_manager" || @request.auth.role = "warehouse_manager"';
+
+    await ensureCollection('stock_takes', 'base', [
+        fld('date', 'date', { required: true }),
+        fld('text', 'taken_by', { required: true }),
+        fld('text', 'taken_by_id'),
+        fld('text', 'notes'),
+        fld('select', 'status', { required: true, values: ['submitted'] }),
+    ], {
+        listRule: TAKE_VIEW_RULE,
+        viewRule: TAKE_VIEW_RULE,
+        createRule: TAKE_CREATE_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
+    const { stock_takes } = await getCollectionsMap();
+
+    await ensureCollection('stock_take_items', 'base', [
+        fld('relation', 'take_id', { collectionId: stock_takes.id, required: true, maxSelect: 1, cascadeDelete: true }),
+        fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
+        fld('number', 'system_qty', { required: true }),
+        fld('number', 'physical_qty', { required: true }),
+        fld('number', 'variance', { required: true }),
+    ], {
+        listRule: TAKE_VIEW_RULE,
+        viewRule: TAKE_VIEW_RULE,
+        createRule: TAKE_CREATE_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
+    // Monthly empties-on-ground counts. system_qty is frozen from
+    // empties.quantity_on_ground at submit time so the report can compare
+    // take-time counts against the live dynamic value. A take never mutates
+    // the empties collection — variances are report-only.
+    const EMPTIES_COUNT_VIEW_RULE = '@request.auth.role = "admin" || @request.auth.role = "operations_manager" || @request.auth.role = "warehouse_manager" || @request.auth.role = "auditor" || @request.auth.role = "empties_manager"';
+    const EMPTIES_COUNT_CREATE_RULE = '@request.auth.role = "admin" || @request.auth.role = "operations_manager" || @request.auth.role = "warehouse_manager" || @request.auth.role = "empties_manager"';
+
+    await ensureCollection('empties_count_takes', 'base', [
+        fld('date', 'date', { required: true }),
+        fld('text', 'taken_by', { required: true }),
+        fld('text', 'taken_by_id'),
+        fld('text', 'notes'),
+        fld('select', 'status', { required: true, values: ['submitted'] }),
+    ], {
+        listRule: EMPTIES_COUNT_VIEW_RULE,
+        viewRule: EMPTIES_COUNT_VIEW_RULE,
+        createRule: EMPTIES_COUNT_CREATE_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
+    const { empties_count_takes } = await getCollectionsMap();
+
+    await ensureCollection('empties_count_items', 'base', [
+        fld('relation', 'take_id', { collectionId: empties_count_takes.id, required: true, maxSelect: 1, cascadeDelete: true }),
+        fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
+        fld('number', 'system_qty', { required: true }),
+        fld('number', 'physical_qty', { required: true }),
+        fld('number', 'variance', { required: true }),
+    ], {
+        listRule: EMPTIES_COUNT_VIEW_RULE,
+        viewRule: EMPTIES_COUNT_VIEW_RULE,
+        createRule: EMPTIES_COUNT_CREATE_RULE,
+        updateRule: ADMIN_RULE,
+        deleteRule: ADMIN_RULE,
+    }, flags.force);
+
     await ensureCollection('returns', 'base', [
         fld('relation', 'order_id', { collectionId: orders.id, required: true, maxSelect: 1, cascadeDelete: true }),
         fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
@@ -442,18 +578,43 @@ async function main() {
         fld('date', 'date', { required: true }),
     ], {}, flags.force);
 
-    // Add 'created_by' field to orders collection if missing on existing DBs
+    // Add 'created_by' + crate deposit fields to orders collection if missing on existing DBs
     const ordersCol = (await pb.collections.getFullList()).find((c) => c.name === 'orders');
     if (ordersCol) {
         const existingFieldNames = ordersCol.fields.map((f) => f.name);
-        if (!existingFieldNames.includes('created_by')) {
+        const extraOrderFields = [];
+        if (!existingFieldNames.includes('created_by')) extraOrderFields.push(fld('relation', 'created_by', { collectionId: users.id, maxSelect: 1 }));
+        if (!existingFieldNames.includes('crate_deposit_qty')) extraOrderFields.push(fld('number', 'crate_deposit_qty'));
+        if (!existingFieldNames.includes('crate_deposit_total')) extraOrderFields.push(fld('number', 'crate_deposit_total'));
+        if (extraOrderFields.length > 0) {
             if (!flags.dryRun) {
                 await pb.collections.update(ordersCol.id, {
-                    fields: [...ordersCol.fields, fld('relation', 'created_by', { collectionId: users.id, maxSelect: 1 })],
+                    fields: [...ordersCol.fields, ...extraOrderFields],
                 });
-                console.log('  [ok] added created_by field to orders');
+                console.log(`  [ok] added ${extraOrderFields.length} missing field(s) to orders`);
             } else {
-                console.log('  [dry-run] would add created_by field to orders');
+                console.log(`  [dry-run] would add ${extraOrderFields.length} field(s) to orders`);
+            }
+        }
+    }
+
+    // Add deposit fields to empties_log on existing DBs so the POS can flag
+    // which customer_purchase quantities were covered by a cash deposit.
+    // The external empties-balance hook should allow projectedBalance >= -deposit_qty.
+    const emptiesLogCol = (await pb.collections.getFullList()).find((c) => c.name === 'empties_log');
+    if (emptiesLogCol) {
+        const existingFieldNames = emptiesLogCol.fields.map((f) => f.name);
+        const extraFields = [];
+        if (!existingFieldNames.includes('deposit_qty')) extraFields.push(fld('number', 'deposit_qty'));
+        if (!existingFieldNames.includes('deposit_total')) extraFields.push(fld('number', 'deposit_total'));
+        if (extraFields.length > 0) {
+            if (!flags.dryRun) {
+                await pb.collections.update(emptiesLogCol.id, {
+                    fields: [...emptiesLogCol.fields, ...extraFields],
+                });
+                console.log(`  [ok] added ${extraFields.length} missing field(s) to empties_log`);
+            } else {
+                console.log(`  [dry-run] would add ${extraFields.length} field(s) to empties_log`);
             }
         }
     }
@@ -480,7 +641,28 @@ async function main() {
             key: 'wholesale_surcharge',
             value: { amount: 2, product_ids: [] }
         });
+        await pb.collection('app_settings').create({
+            key: 'crate_deposit',
+            value: { amount: 200 }
+        });
         console.log('  [ok] seeded default app_settings');
+    }
+
+    // Seed crate_deposit setting on existing DBs that already have other settings
+    if (!flags.dryRun) {
+        try {
+            await pb.collection('app_settings').getFirstListItem('key = "crate_deposit"');
+        } catch {
+            try {
+                await pb.collection('app_settings').create({
+                    key: 'crate_deposit',
+                    value: { amount: 200 }
+                });
+                console.log('  [ok] seeded crate_deposit app_setting (200 GHc/crate)');
+            } catch {
+                // app_settings collection may not exist in dry-run / fresh flows
+            }
+        }
     }
 
     // Also create inventory_logs fields that may be missing on existing DBs
@@ -537,10 +719,13 @@ async function main() {
         console.error('Error: users auth collection not found.');
         process.exit(1);
     }
+    const ROLE_VALUES = ['admin', 'empties_manager', 'operations_manager', 'warehouse_manager', 'sales_manager', 'cashier', 'auditor'];
     const hasRole = usersCol.fields.some((f) => f.name === 'role');
     const fields = hasRole
-        ? usersCol.fields
-        : [...usersCol.fields, fld('select', 'role', { values: ['admin', 'empties_manager', 'operations_manager', 'sales_manager', 'cashier', 'auditor'], maxSelect: 1 })];
+        ? usersCol.fields.map((f) => (f.name === 'role' && f.type === 'select' && !(f.values || []).includes('warehouse_manager')
+            ? { ...f, values: [...(f.values || []), 'warehouse_manager'] }
+            : f))
+        : [...usersCol.fields, fld('select', 'role', { values: ROLE_VALUES, maxSelect: 1 })];
     if (!flags.dryRun) {
         await pb.collections.update(usersCol.id, {
             fields,

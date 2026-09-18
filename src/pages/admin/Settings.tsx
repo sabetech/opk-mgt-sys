@@ -18,6 +18,10 @@ interface WholesaleSurcharge {
     product_ids: string[]
 }
 
+interface CrateDeposit {
+    amount: number
+}
+
 interface Product {
     id: string
     sku_name: string
@@ -28,14 +32,17 @@ export default function Settings() {
     const [loading, setLoading] = useState(true)
     const [savingStock, setSavingStock] = useState(false)
     const [savingSurcharge, setSavingSurcharge] = useState(false)
+    const [savingDeposit, setSavingDeposit] = useState(false)
 
     const [stockThresholds, setStockThresholds] = useState<StockThresholds>({ low_max: 20, medium_max: 50 })
     const [surcharge, setSurcharge] = useState<WholesaleSurcharge>({ amount: 2, product_ids: [] })
+    const [crateDeposit, setCrateDeposit] = useState<CrateDeposit>({ amount: 200 })
     const [products, setProducts] = useState<Product[]>([])
     const [productSearch, setProductSearch] = useState("")
 
     const [stockSettingsId, setStockSettingsId] = useState<string | null>(null)
     const [surchargeSettingsId, setSurchargeSettingsId] = useState<string | null>(null)
+    const [depositSettingsId, setDepositSettingsId] = useState<string | null>(null)
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -64,6 +71,16 @@ export default function Settings() {
                     setSurchargeSettingsId(surchargeRecord.id)
                 } catch {
                     // Record doesn't exist yet
+                }
+
+                // Fetch crate deposit (refundable per-crate fee for retailers
+                // without enough empties to buy returnable products)
+                try {
+                    const depositRecord = await pb.collection('app_settings').getFirstListItem('key = "crate_deposit"')
+                    setCrateDeposit(depositRecord.value as CrateDeposit)
+                    setDepositSettingsId(depositRecord.id)
+                } catch {
+                    // Record doesn't exist yet (defaults to 200 GHc)
                 }
             } catch (err) {
                 console.error("Error fetching settings:", err)
@@ -118,6 +135,33 @@ export default function Settings() {
             toast.error("Failed to save surcharge settings")
         } finally {
             setSavingSurcharge(false)
+        }
+    }
+
+    const handleSaveDeposit = async () => {
+        if (crateDeposit.amount < 0) {
+            toast.error("Deposit amount cannot be negative")
+            return
+        }
+        setSavingDeposit(true)
+        try {
+            if (depositSettingsId) {
+                await pb.collection('app_settings').update(depositSettingsId, {
+                    value: crateDeposit
+                })
+            } else {
+                const record = await pb.collection('app_settings').create({
+                    key: 'crate_deposit',
+                    value: crateDeposit
+                })
+                setDepositSettingsId(record.id)
+            }
+            toast.success("Crate deposit settings saved!")
+        } catch (err) {
+            console.error("Error saving crate deposit settings:", err)
+            toast.error("Failed to save crate deposit settings")
+        } finally {
+            setSavingDeposit(false)
         }
     }
 
@@ -271,6 +315,41 @@ export default function Settings() {
                     <Button onClick={handleSaveSurcharge} disabled={savingSurcharge} className="bg-amber-700 hover:bg-amber-800 gap-2">
                         {savingSurcharge ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         {savingSurcharge ? "Saving..." : "Save Surcharge Settings"}
+                    </Button>
+                </CardContent>
+            </Card>
+
+            {/* Crate Deposit */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Crate Deposit</CardTitle>
+                    <CardDescription>
+                        Refundable per-crate fee charged to retailers without enough empty crates
+                        to buy returnable products. Covers the shortfall only; refunded in cash
+                        when empties are returned. MOU customers are exempt.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2 max-w-xs">
+                        <Label htmlFor="crate_deposit_amount">Deposit Amount per Crate (GHc)</Label>
+                        <Input
+                            id="crate_deposit_amount"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={crateDeposit.amount}
+                            onChange={(e) => setCrateDeposit({
+                                amount: parseFloat(e.target.value) || 0
+                            })}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                            Frozen per order at sale time, so changing this never rewrites history.
+                        </p>
+                    </div>
+
+                    <Button onClick={handleSaveDeposit} disabled={savingDeposit} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                        {savingDeposit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        {savingDeposit ? "Saving..." : "Save Crate Deposit"}
                     </Button>
                 </CardContent>
             </Card>
