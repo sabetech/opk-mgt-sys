@@ -10,12 +10,13 @@ import {
     Wallet,
     CheckCircle2,
     Loader2,
-    Printer
+    Printer,
+    FileText
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import { generateOrderNumber } from "@/lib/orderNumber"
-import { buildSaleReceiptHtml, printReceiptHtml, type CompletedSale } from "@/lib/receipt"
+import { buildSaleReceiptHtml, buildProformaHtml, generateProformaReference, printReceiptHtml, type CompletedSale, type ProformaInvoice } from "@/lib/receipt"
 import { suggestProduct } from "@/lib/productSearch"
 import { fetchCustomerBalance } from "@/lib/customerBalance"
 import { toast } from "sonner"
@@ -313,6 +314,8 @@ export default function Sale() {
     const [processing, setProcessing] = useState(false)
     const [completedSale, setCompletedSale] = useState<CompletedSale | null>(null)
     const [successOpen, setSuccessOpen] = useState(false)
+    const [proforma, setProforma] = useState<ProformaInvoice | null>(null)
+    const [proformaOpen, setProformaOpen] = useState(false)
 
     const handleCloseSuccess = () => {
         setSuccessOpen(false)
@@ -322,6 +325,54 @@ export default function Sale() {
     const handlePrintReceipt = () => {
         if (!completedSale) return
         printReceiptHtml(buildSaleReceiptHtml(completedSale), `Receipt #${completedSale.orderNumber}`)
+    }
+
+    // Proforma invoice: quote only. Reads cart/customer/totals and prints —
+    // writes NOTHING (no order, sale, stock, empties, or deposit records).
+    const handleProforma = () => {
+        if (!selectedCustomer) {
+            toast.error("Please select a customer first.")
+            return
+        }
+        if (cart.length === 0) {
+            toast.error("Cart is empty.")
+            return
+        }
+        setProforma({
+            reference: generateProformaReference(),
+            dateTime: new Date(),
+            customerName: selectedCustomer.name,
+            customerType: selectedCustomer.customer_types?.name ?? null,
+            paymentType,
+            servedBy: profile?.full_name ?? null,
+            items: cart.map((item) => ({
+                productName: item.productName,
+                skuCode: item.skuCode,
+                quantity: item.quantity,
+                price: item.price,
+                surcharge: item.surcharge,
+                total: item.total,
+            })),
+            totalQuantity,
+            subtotal: cartSubtotal,
+            grandTotal,
+            crateDepositQty: depositQty,
+            crateDepositTotal: depositTotal,
+            crateDepositUnitAmount: depositConfig.amount,
+        })
+        setProformaOpen(true)
+    }
+
+    const handlePrintProforma = () => {
+        if (!proforma) return
+        printReceiptHtml(buildProformaHtml(proforma), `Proforma ${proforma.reference}`)
+        // Clear for the next customer (same reset as a completed checkout)
+        setProformaOpen(false)
+        setProforma(null)
+        setCart([])
+        setSelectedCustomer(null)
+        setApplyDeposit(true)
+        setApplySurcharge(false)
     }
 
     const handleCheckout = async () => {
@@ -858,7 +909,15 @@ export default function Sale() {
                                 </Select>
                             </div>
                         </CardContent>
-                        <CardFooter className="pt-2">
+                        <CardFooter className="pt-2 flex flex-col gap-2">
+                            <Button
+                                variant="outline"
+                                onClick={handleProforma}
+                                className="w-full gap-2"
+                                disabled={cart.length === 0 || processing}
+                            >
+                                <FileText className="h-4 w-4" /> Proforma Invoice
+                            </Button>
                             <Button
                                 onClick={handleCheckout}
                                 className="w-full h-14 bg-amber-800 hover:bg-amber-900 text-lg font-bold shadow-md uppercase tracking-widest gap-2"
@@ -967,6 +1026,63 @@ export default function Sale() {
                         </Button>
                         <Button onClick={handlePrintReceipt} className="bg-amber-800 hover:bg-amber-900">
                             <Printer className="h-4 w-4 mr-2" /> Print Receipt
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Proforma Invoice Preview (quote only — prints nothing to records) */}
+            <Dialog open={proformaOpen} onOpenChange={setProformaOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <FileText className="h-5 w-5" />
+                            Proforma Invoice
+                        </DialogTitle>
+                        <DialogDescription>
+                            Quote only — printing records no sale, stock, or payment.
+                        </DialogDescription>
+                    </DialogHeader>
+                    {proforma && (
+                        <div className="rounded-lg border bg-muted/20 p-4">
+                            <div className="mx-auto max-w-[280px] bg-white p-3 font-mono text-xs leading-relaxed text-black shadow-sm">
+                                <p className="text-center font-bold">OPPONG KYEKYEKU<br />DISTRIBUTION LTD</p>
+                                <p className="text-center">*** PROFORMA INVOICE ***</p>
+                                <div className="my-2 border border-black p-1 text-center font-bold">
+                                    QUOTE ONLY — NOT A SALE
+                                </div>
+                                <p>Ref No: <strong>{proforma.reference}</strong></p>
+                                <p>Customer: <strong>{proforma.customerName}</strong></p>
+                                <div className="my-2 border-t border-dashed border-black" />
+                                {proforma.items.map((item, index) => (
+                                    <div key={`${item.skuCode}-${index}`} className="mb-1">
+                                        <p className="font-bold">{index + 1}. {item.productName}</p>
+                                        <p className="flex justify-between">
+                                            <span>{item.quantity} x {(item.price + item.surcharge).toFixed(2)}</span>
+                                            <span>{item.total.toFixed(2)}</span>
+                                        </p>
+                                    </div>
+                                ))}
+                                <div className="my-2 border-t border-dashed border-black" />
+                                {(proforma.crateDepositQty ?? 0) > 0 && (
+                                    <p className="flex justify-between">
+                                        <span>Crate deposit ({proforma.crateDepositQty} x {(proforma.crateDepositUnitAmount ?? 0).toFixed(2)})</span>
+                                        <span>{(proforma.crateDepositTotal ?? 0).toFixed(2)}</span>
+                                    </p>
+                                )}
+                                <p className="flex justify-between font-bold">
+                                    <span>TOTAL:</span>
+                                    <span>GH₵ {proforma.grandTotal.toFixed(2)}</span>
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button variant="outline" onClick={() => setProformaOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handlePrintProforma} className="bg-amber-800 hover:bg-amber-900">
+                            <Printer className="h-4 w-4 mr-2" /> Print Proforma
                         </Button>
                     </DialogFooter>
                 </DialogContent>

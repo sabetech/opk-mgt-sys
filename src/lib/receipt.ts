@@ -114,6 +114,105 @@ ${(sale.crateDepositQty ?? 0) > 0 ? `<div class="totals"><span>Crate deposit (${
 </body></html>`
 }
 
+export interface ProformaInvoice {
+    /** Client-side reference only (e.g. PF-20260919-A3F9). Never persisted. */
+    reference: string
+    dateTime: Date
+    customerName: string
+    customerType?: string | null
+    paymentType: string
+    servedBy?: string | null
+    items: ReceiptItem[]
+    totalQuantity: number
+    subtotal: number
+    crateDepositQty?: number
+    crateDepositTotal?: number
+    crateDepositUnitAmount?: number
+    grandTotal: number
+}
+
+/** Client-side proforma reference. Never touches the orders sequence. */
+export function generateProformaReference(date = new Date()): string {
+    const pad = (n: number) => String(n).padStart(2, "0")
+    const stamp = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+    const suffix = Math.random().toString(36).substring(2, 6).toUpperCase()
+    return `PF-${stamp}-${suffix}`
+}
+
+/**
+ * Builds a standalone proforma invoice document (same thermal layout as the
+ * sales receipt). A proforma is a quote only: it records nothing, changes no
+ * stock, and must never be confused with a sale — hence the banner.
+ */
+export function buildProformaHtml(proforma: ProformaInvoice): string {
+    const itemRows = proforma.items
+        .map((item, index) => {
+            const unitPrice = item.price + item.surcharge
+            const surchargeNote =
+                item.surcharge > 0
+                    ? `<div class="muted">incl. GHc ${formatMoney(item.surcharge)} surcharge</div>`
+                    : ""
+            return `<tr>
+                <td class="item">${index + 1}. ${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.skuCode)}</div>${surchargeNote}</td>
+            </tr>
+            <tr>
+                <td class="line"><span>${item.quantity} x ${formatMoney(unitPrice)}</span><span>${formatMoney(item.total)}</span></td>
+            </tr>`
+        })
+        .join("")
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Proforma ${escapeHtml(proforma.reference)}</title>
+<style>
+@page { size: 80mm auto; margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: #fff; }
+body {
+    width: 72mm;
+    margin: 0 auto;
+    padding: 2mm 1mm 6mm;
+    font-family: "Courier New", Courier, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    color: #000;
+}
+.center { text-align: center; }
+.company { font-size: 15px; font-weight: bold; }
+.divider { border-top: 1px dashed #000; margin: 6px 0; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 1px 0; vertical-align: top; word-wrap: break-word; }
+.item { font-weight: bold; }
+.muted { font-weight: normal; font-size: 11px; }
+.line { display: flex; justify-content: space-between; gap: 8px; }
+.totals { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; }
+.grand { font-size: 15px; }
+.meta { display: flex; justify-content: space-between; gap: 8px; }
+.notice { border: 1px solid #000; padding: 4px; margin: 6px 0; text-align: center; font-weight: bold; }
+@media print {
+    body { width: 72mm; margin: 0 auto; }
+}
+</style></head><body>
+<div class="center company">OPPONG KYEKYEKU<br />DISTRIBUTION LTD</div>
+<div class="center">*** PROFORMA INVOICE ***</div>
+<div class="notice">QUOTE ONLY — NOT A SALE<br />NO STOCK OR PAYMENT RECORDED</div>
+<div class="divider"></div>
+<div class="meta"><span>Ref No:</span><span><strong>${escapeHtml(proforma.reference)}</strong></span></div>
+<div class="meta"><span>Date:</span><span>${formatDateTime(proforma.dateTime)}</span></div>
+<div class="meta"><span>Customer:</span><span><strong>${escapeHtml(proforma.customerName)}</strong></span></div>
+${proforma.customerType ? `<div class="meta"><span>Cust. Type:</span><span>${escapeHtml(proforma.customerType)}</span></div>` : ""}
+<div class="meta"><span>Payment:</span><span>${escapeHtml(proforma.paymentType.replace(/_/g, " "))}</span></div>
+${proforma.servedBy ? `<div class="meta"><span>Served by:</span><span>${escapeHtml(proforma.servedBy)}</span></div>` : ""}
+<div class="divider"></div>
+<table><tbody>${itemRows}</tbody></table>
+<div class="divider"></div>
+<div class="totals"><span>Total Qty:</span><span>${proforma.totalQuantity}</span></div>
+<div class="totals"><span>Subtotal:</span><span>GHc ${formatMoney(proforma.subtotal)}</span></div>
+${(proforma.crateDepositQty ?? 0) > 0 ? `<div class="totals"><span>Crate deposit (${proforma.crateDepositQty} x ${formatMoney(proforma.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(proforma.crateDepositTotal ?? 0)}</span></div>` : ""}
+<div class="totals grand"><span>TOTAL:</span><span>GHc ${formatMoney(proforma.grandTotal)}</span></div>
+<div class="divider"></div>
+<div class="center">Thank you for your patronage!</div>
+</body></html>`
+}
+
 export interface StockLevelRow {
     skuCode: string
     productName: string
