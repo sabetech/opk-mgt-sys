@@ -175,9 +175,10 @@ export default function PendingOrders() {
         if (confirmed) {
             try {
                 // 1. Fetch warehouse order items to restore stock
+                // (no `fields` restriction: `expand` needs the full record on this host)
                 const whItems = await pb.collection('warehouse_order_items').getFullList({
                     filter: `warehouse_order_id = "${warehouseOrderId}"`,
-                    fields: 'product_id, quantity',
+                    expand: 'product_id',
                 })
 
                 // 2. Determine sale type from POS order's customer
@@ -221,10 +222,36 @@ export default function PendingOrders() {
                     })
                 }
 
-                // 4. Cancel Warehouse Order
+                // 4. Reverse the empties purchase debt for returnable items, so the
+                // customer ledger (and live balance) self-corrects on cancel
+                try {
+                    const returnableQty = whItems
+                        .filter((item) => item.expand?.product_id?.returnable === true)
+                        .reduce((sum: number, item) => sum + (item.quantity || 0), 0)
+                    if (posOrder?.customer_id && returnableQty > 0) {
+                        const reversal = await pb.collection('empties_log').create({
+                            date: today,
+                            customer_id: posOrder.customer_id,
+                            activity: 'customer_empties_return',
+                            total_quantity: returnableQty,
+                        })
+                        for (const item of whItems) {
+                            if (item.expand?.product_id?.returnable !== true || !item.product_id) continue
+                            await pb.collection('empties_log_detail').create({
+                                log_id: reversal.id,
+                                product_id: item.product_id,
+                                quantity: item.quantity,
+                            })
+                        }
+                    }
+                } catch (err) {
+                    console.warn("Failed to reverse empties ledger on cancel:", err)
+                }
+
+                // 5. Cancel Warehouse Order
                 await pb.collection('warehouse_orders').update(warehouseOrderId, { status: 'cancelled' })
 
-                // 5. Cancel POS Order (Revert Sale)
+                // 6. Cancel POS Order (Revert Sale)
                 await pb.collection('orders').update(posOrderId, { status: 'cancelled' })
 
                 toast.success("Sale reverted and warehouse order cancelled.")

@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Edit, Trash2, Search, Loader2, History } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
+import { fetchCustomerBalances } from "@/lib/customerBalance"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 import CustomerHistorySheet from "./CustomerHistorySheet"
@@ -54,6 +55,9 @@ export default function CustomerList() {
     const { profile } = useAuth()
     const [customers, setCustomers] = useState<Customer[]>([])
     const [loading, setLoading] = useState(true)
+    // Live crates balances (opening + empties ledger). The stored
+    // customers.balance field is opening-only — see lib/customerBalance.
+    const [liveBalances, setLiveBalances] = useState<Record<string, number>>({})
     const [searchTerm, setSearchTerm] = useState("")
     const [filterType, setFilterType] = useState("All")
     const [customerTypes, setCustomerTypes] = useState<CustomerType[]>([])
@@ -90,6 +94,18 @@ export default function CustomerList() {
                 type_id: r.type_id,
                 customer_types: r.expand?.type_id ?? null,
             })))
+
+            // Live ledger-driven balances for the crates column
+            try {
+                const openings: Record<string, number> = {}
+                for (const r of customersRecords) openings[r.id] = r.balance || 0
+                const computed = await fetchCustomerBalances(openings)
+                const map: Record<string, number> = {}
+                for (const [id, b] of Object.entries(computed)) map[id] = b.balance
+                setLiveBalances(map)
+            } catch (err) {
+                console.error("Error computing live balances:", err)
+            }
 
             const typesData = await pb.collection('customer_types').getFullList({ sort: 'name' })
             setCustomerTypes(typesData.map((t) => ({ id: t.id, name: t.name })))
@@ -237,7 +253,7 @@ export default function CustomerList() {
                                             )}
                                         </div>
                                     </TableCell>
-                                    <TableCell className="text-right">{customer.balance}</TableCell>
+                                    <TableCell className="text-right">{liveBalances[customer.id] ?? customer.balance}</TableCell>
                                     {profile?.role !== 'auditor' && (
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">

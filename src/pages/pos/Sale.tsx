@@ -17,6 +17,7 @@ import { useAuth } from "@/context/AuthContext"
 import { generateOrderNumber } from "@/lib/orderNumber"
 import { buildSaleReceiptHtml, printReceiptHtml, type CompletedSale } from "@/lib/receipt"
 import { suggestProduct } from "@/lib/productSearch"
+import { fetchCustomerBalance } from "@/lib/customerBalance"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -112,6 +113,28 @@ export default function Sale() {
     // Refundable crate deposit (per crate, covers empties shortfall only)
     const [depositConfig, setDepositConfig] = useState<{ amount: number }>({ amount: 200 })
     const [applyDeposit, setApplyDeposit] = useState(true)
+
+    // Live crates balance for the selected customer (opening + empties
+    // ledger). The stored customers.balance field is opening-only.
+    const [liveBalance, setLiveBalance] = useState(0)
+    useEffect(() => {
+        if (!selectedCustomer) {
+            setLiveBalance(0)
+            return
+        }
+        let cancelled = false
+        const opening = selectedCustomer.balance || 0
+        fetchCustomerBalance(selectedCustomer.id, opening)
+            .then((b) => {
+                if (!cancelled) setLiveBalance(b)
+            })
+            .catch(() => {
+                if (!cancelled) setLiveBalance(opening)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [selectedCustomer])
 
     // Fetch customers (reusable for refresh after add)
     const fetchCustomers = async () => {
@@ -274,7 +297,7 @@ export default function Sale() {
         .filter(item => item.isReturnable)
         .reduce((sum, item) => sum + item.quantity, 0)
 
-    const currentBalance = selectedCustomer?.balance || 0
+    const currentBalance = liveBalance
     const projectedBalance = currentBalance - requiredEmpties
     // MOU customers keep the current "go negative free" path and are never
     // offered a deposit. Wholesalers never pay the crate deposit either, so

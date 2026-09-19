@@ -43,6 +43,7 @@ type TimelineEntry = {
 export default function CustomerHistorySheet({ customer, open, onOpenChange }: CustomerHistorySheetProps) {
     const [loading, setLoading] = useState(false)
     const [timeline, setTimeline] = useState<TimelineEntry[]>([])
+    const [netBalance, setNetBalance] = useState<number | null>(null)
     const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
 
     useEffect(() => {
@@ -144,6 +145,16 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
             entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
             setTimeline(entries)
 
+            // Net crates balance from the empties ledger only (orders would
+            // double-count purchases already logged as customer_purchase)
+            setNetBalance(
+                (empties || []).reduce(
+                    (sum: number, log) =>
+                        sum + (log.activity === 'customer_empties_return' ? 1 : -1) * (log.total_quantity || 0),
+                    0
+                )
+            )
+
         } catch (error) {
             console.error("Error fetching customer history:", error)
         } finally {
@@ -168,6 +179,14 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                     </SheetTitle>
                     <SheetDescription>
                         Timeline of purchases and empties for <span className="font-bold text-foreground">{customer?.name}</span>
+                        {netBalance !== null && (
+                            <span className="block mt-1">
+                                Net crates balance:{" "}
+                                <span className={cn("font-bold", netBalance < 0 ? "text-red-600" : "text-green-600")}>
+                                    {netBalance > 0 ? `+${netBalance}` : netBalance}
+                                </span>
+                            </span>
+                        )}
                     </SheetDescription>
                 </SheetHeader>
 
