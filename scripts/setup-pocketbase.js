@@ -673,12 +673,33 @@ async function main() {
         fld('text', 'key', { required: true, unique: true }),
         { system: false, id: `fld_${Date.now().toString(36)}_${++fieldCounter}`, name: 'value', type: 'json', required: false, unique: false },
     ], {
-        listRule: ADMIN_RULE,
-        viewRule: ADMIN_RULE,
+        // Reads are needed by sales_manager sessions (POS surcharge/deposit,
+        // Manage Products thresholds). Writes stay admin-only.
+        listRule: `${ADMIN_RULE} || @request.auth.role = "sales_manager"`,
+        viewRule: `${ADMIN_RULE} || @request.auth.role = "sales_manager"`,
         createRule: ADMIN_RULE,
         updateRule: ADMIN_RULE,
         deleteRule: ADMIN_RULE,
     }, flags.force);
+
+    // Open app_settings reads to sales_manager on existing DBs (POS surcharge
+    // and crate deposit, Manage Products thresholds). Writes stay admin-only.
+    const settingsReadRule = `${ADMIN_RULE} || @request.auth.role = "sales_manager"`;
+    const appSettingsCol = (await pb.collections.getFullList()).find((c) => c.name === 'app_settings');
+    if (appSettingsCol && (appSettingsCol.listRule !== settingsReadRule || appSettingsCol.viewRule !== settingsReadRule)) {
+        if (!flags.dryRun) {
+            await pb.collections.update(appSettingsCol.id, {
+                listRule: settingsReadRule,
+                viewRule: settingsReadRule,
+                createRule: ADMIN_RULE,
+                updateRule: ADMIN_RULE,
+                deleteRule: ADMIN_RULE,
+            });
+            console.log('  [ok] opened app_settings read access to sales_manager');
+        } else {
+            console.log('  [dry-run] would open app_settings read access to sales_manager');
+        }
+    }
 
     // Seed default app_settings if empty
     const settingsCount = await pb.collection('app_settings').getList(1, 1, { perPage: 1 });
