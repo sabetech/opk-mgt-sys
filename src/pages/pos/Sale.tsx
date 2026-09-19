@@ -324,7 +324,12 @@ export default function Sale() {
 
     const handlePrintReceipt = () => {
         if (!completedSale) return
-        printReceiptHtml(buildSaleReceiptHtml(completedSale), `Receipt #${completedSale.orderNumber}`)
+        const html = buildSaleReceiptHtml(completedSale)
+        const title = `Receipt #${completedSale.orderNumber}`
+        // Close the app modal BEFORE the native print UI takes focus:
+        // dismissing afterwards is unreliable once the browser owns focus.
+        handleCloseSuccess()
+        window.setTimeout(() => printReceiptHtml(html, title), 100)
     }
 
     // Proforma invoice: quote only. Reads cart/customer/totals and prints —
@@ -365,14 +370,18 @@ export default function Sale() {
 
     const handlePrintProforma = () => {
         if (!proforma) return
-        printReceiptHtml(buildProformaHtml(proforma), `Proforma ${proforma.reference}`)
-        // Clear for the next customer (same reset as a completed checkout)
+        const html = buildProformaHtml(proforma)
+        const title = `Proforma ${proforma.reference}`
+        // Close the app modal BEFORE the native print UI takes focus:
+        // dismissing afterwards is unreliable once the browser owns focus.
         setProformaOpen(false)
         setProforma(null)
+        // Clear for the next customer (same reset as a completed checkout)
         setCart([])
         setSelectedCustomer(null)
         setApplyDeposit(true)
         setApplySurcharge(false)
+        window.setTimeout(() => printReceiptHtml(html, title), 100)
     }
 
     const handleCheckout = async () => {
