@@ -1031,49 +1031,41 @@ export default function Sale() {
                 </DialogContent>
             </Dialog>
 
-            {/* Proforma Invoice Preview (quote only — prints nothing to records) */}
+            {/* Proforma Invoice confirmation (quote only — prints nothing to records) */}
             <Dialog open={proformaOpen} onOpenChange={setProformaOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <FileText className="h-5 w-5" />
-                            Proforma Invoice
+                            Print Proforma Invoice?
                         </DialogTitle>
                         <DialogDescription>
                             Quote only — printing records no sale, stock, or payment.
                         </DialogDescription>
                     </DialogHeader>
                     {proforma && (
-                        <div className="rounded-lg border bg-muted/20 p-4">
-                            <div className="mx-auto max-w-[280px] bg-white p-3 font-mono text-xs leading-relaxed text-black shadow-sm">
-                                <p className="text-center font-bold">OPPONG KYEKYEKU<br />DISTRIBUTION LTD</p>
-                                <p className="text-center">*** PROFORMA INVOICE ***</p>
-                                <div className="my-2 border border-black p-1 text-center font-bold">
-                                    QUOTE ONLY — NOT A SALE
+                        <div className="rounded-lg border bg-muted/20 p-4 text-sm space-y-2">
+                            <div className="flex justify-between">
+                                <span className="text-muted-foreground">Reference</span>
+                                <span className="font-mono font-bold">{proforma.reference}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-muted-foreground">Customer</span>
+                                <span className="font-bold">{proforma.customerName}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-muted-foreground">Items</span>
+                                <span className="font-bold">{proforma.items.length} product(s) · {proforma.totalQuantity} pcs</span>
+                            </div>
+                            {(proforma.crateDepositQty ?? 0) > 0 && (
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Crate deposit</span>
+                                    <span className="font-bold">GH₵ {(proforma.crateDepositTotal ?? 0).toFixed(2)}</span>
                                 </div>
-                                <p>Ref No: <strong>{proforma.reference}</strong></p>
-                                <p>Customer: <strong>{proforma.customerName}</strong></p>
-                                <div className="my-2 border-t border-dashed border-black" />
-                                {proforma.items.map((item, index) => (
-                                    <div key={`${item.skuCode}-${index}`} className="mb-1">
-                                        <p className="font-bold">{index + 1}. {item.productName}</p>
-                                        <p className="flex justify-between">
-                                            <span>{item.quantity} x {(item.price + item.surcharge).toFixed(2)}</span>
-                                            <span>{item.total.toFixed(2)}</span>
-                                        </p>
-                                    </div>
-                                ))}
-                                <div className="my-2 border-t border-dashed border-black" />
-                                {(proforma.crateDepositQty ?? 0) > 0 && (
-                                    <p className="flex justify-between">
-                                        <span>Crate deposit ({proforma.crateDepositQty} x {(proforma.crateDepositUnitAmount ?? 0).toFixed(2)})</span>
-                                        <span>{(proforma.crateDepositTotal ?? 0).toFixed(2)}</span>
-                                    </p>
-                                )}
-                                <p className="flex justify-between font-bold">
-                                    <span>TOTAL:</span>
-                                    <span>GH₵ {proforma.grandTotal.toFixed(2)}</span>
-                                </p>
+                            )}
+                            <div className="flex justify-between border-t pt-2 text-base">
+                                <span className="font-bold">Grand Total</span>
+                                <span className="font-black">GH₵ {proforma.grandTotal.toFixed(2)}</span>
                             </div>
                         </div>
                     )}

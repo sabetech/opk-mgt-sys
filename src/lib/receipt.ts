@@ -299,7 +299,12 @@ export function printReceiptHtml(html: string, title = "Receipt"): void {
     doc.open()
     doc.write(html)
     doc.close()
-    iframe.onload = () => {
+    // Guard: print exactly once. Without this, onload + the fallback below
+    // each open a native print dialog (stacked duplicates).
+    let printed = false
+    const doPrint = () => {
+        if (printed) return
+        printed = true
         try {
             iframe.contentWindow?.focus()
             iframe.contentWindow?.print()
@@ -307,13 +312,11 @@ export function printReceiptHtml(html: string, title = "Receipt"): void {
             cleanup()
         }
     }
+    iframe.onload = doPrint
     // Fallback in case onload already fired synchronously
     window.setTimeout(() => {
         try {
-            if (document.body.contains(iframe)) {
-                iframe.contentWindow?.focus()
-                iframe.contentWindow?.print()
-            }
+            if (document.body.contains(iframe)) doPrint()
         } catch {
             // ignore; user can retry from the still-open dialog
         }
