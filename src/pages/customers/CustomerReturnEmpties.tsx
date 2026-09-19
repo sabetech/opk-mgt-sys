@@ -141,7 +141,8 @@ export default function CustomerReturnEmpties() {
                     sort: 'name',
                     filter: 'deleted_at = ""',
                     expand: 'type_id',
-                    fields: 'id, name, type_id'
+                    // NOTE: `expand` must be listed in `fields` or this host drops it
+                    fields: 'id, name, type_id, expand'
                 })
                 setCustomers(customersData.map((c) => ({
                     id: c.id,

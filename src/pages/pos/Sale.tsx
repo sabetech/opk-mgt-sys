@@ -209,7 +209,8 @@ export default function Sale() {
     }
 
     // Check if wholesale surcharge applies to current selection
-    const isSurchargeApplicable = selectedCustomer?.customer_types?.name === "Wholesaler" &&
+    const isWholesaler = selectedCustomer?.customer_types?.name === "Wholesaler"
+    const isSurchargeApplicable = isWholesaler &&
         surchargeConfig.product_ids.includes(selectedProduct?.id || "") &&
         surchargeConfig.amount > 0
 
@@ -276,9 +277,10 @@ export default function Sale() {
     const currentBalance = selectedCustomer?.balance || 0
     const projectedBalance = currentBalance - requiredEmpties
     // MOU customers keep the current "go negative free" path and are never
-    // offered a deposit. Non-MOU customers with a shortfall must cover it
-    // with a refundable per-crate deposit instead of submitting empties.
-    const emptiesShortfall = !selectedCustomer?.has_mou ? Math.max(0, -projectedBalance) : 0
+    // offered a deposit. Wholesalers never pay the crate deposit either, so
+    // they get no shortfall, no missing-crates warning, and no charge.
+    // Only non-MOU, non-wholesaler shortfalls require the refundable deposit.
+    const emptiesShortfall = !isWholesaler && !selectedCustomer?.has_mou ? Math.max(0, -projectedBalance) : 0
     const depositApplicable = emptiesShortfall > 0 && depositConfig.amount > 0
     const depositQty = depositApplicable && applyDeposit ? emptiesShortfall : 0
     const depositTotal = depositQty * depositConfig.amount

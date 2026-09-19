@@ -187,7 +187,8 @@ export default function PendingOrders() {
                 const customer = posOrder?.customer_id
                     ? await pb.collection('customers').getOne(posOrder.customer_id, {
                         expand: 'type_id',
-                        fields: 'id, name, type_id',
+                        // NOTE: `expand` must be listed in `fields` or this host drops it
+                        fields: 'id, name, type_id, expand',
                     }).catch(() => null)
                     : null
                 const saleType = customer?.expand?.type_id?.name === 'Wholesaler'
