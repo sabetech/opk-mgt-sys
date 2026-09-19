@@ -93,7 +93,7 @@ export default function StockReport() {
                 return {
                     id: item.id,
                     name: item.sku_name,
-                    code: item.code_name || '',
+                    code: item.product_code || item.code_name || '',
                     quantity,
                     status: getStockStatus(quantity)
                 }
@@ -155,7 +155,7 @@ export default function StockReport() {
                 return {
                     productId: pid,
                     name: product?.sku_name || 'Unknown',
-                    code: product?.code_name || 'N/A',
+                    code: product?.product_code || product?.code_name || 'N/A',
                     systemAtTake: it.system_qty ?? 0,
                     counted: it.physical_qty ?? 0,
                     varianceAtTake: it.variance ?? ((it.physical_qty ?? 0) - (it.system_qty ?? 0)),

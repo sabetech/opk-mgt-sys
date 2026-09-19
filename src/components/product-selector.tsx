@@ -115,7 +115,7 @@ export function ProductSelector({
                                     <CommandEmpty>
                                         {(() => {
                                             const suggestion = suggestProduct(
-                                                products.map((p) => ({ id: p.id, sku_name: p.name, code_name: p.code ?? null })),
+                                                products.map((p) => ({ id: p.id, sku_name: p.name, code_name: p.code ?? null, product_code: p.code ?? null })),
                                                 query,
                                             )
                                             const match = suggestion ? products.find((p) => p.id === suggestion.id) : undefined

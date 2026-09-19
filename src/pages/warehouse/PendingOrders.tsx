@@ -41,6 +41,7 @@ interface OrderItem {
     products: {
         sku_name: string
         code_name: string
+        product_code: string | null
         returnable: boolean
     } | null
 }
@@ -99,7 +100,7 @@ export default function PendingOrders() {
                     product_id: item.product_id,
                     quantity: item.quantity,
                     products: rel
-                        ? { sku_name: rel.sku_name, code_name: rel.code_name, returnable: rel.returnable }
+                        ? { sku_name: rel.sku_name, code_name: rel.code_name, product_code: rel.product_code ?? null, returnable: rel.returnable }
                         : null,
                 }
                 if (!itemsByWhOrder[item.warehouse_order_id]) {
@@ -431,7 +432,7 @@ export default function PendingOrders() {
                                         {selectedOrder.warehouse_order_items.length > 0 ? (
                                             selectedOrder.warehouse_order_items.map((item) => (
                                                 <TableRow key={item.id}>
-                                                    <TableCell className="font-mono text-xs">{item.products?.code_name ?? "—"}</TableCell>
+                                                    <TableCell className="font-mono text-xs">{item.products?.product_code || item.products?.code_name || "—"}</TableCell>
                                                     <TableCell className="font-medium">{item.products?.sku_name ?? "Unknown product"}</TableCell>
                                                     <TableCell className="text-center">{item.quantity}</TableCell>
                                                     <TableCell>

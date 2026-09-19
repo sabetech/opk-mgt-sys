@@ -42,6 +42,7 @@ interface OrderItem {
     products: {
         sku_name: string
         code_name: string
+        product_code: string | null
         returnable: boolean
     } | null
 }
@@ -112,7 +113,7 @@ export default function CompletedOrders() {
                     unit_price: 0,
                     sub_total: 0,
                     products: rel
-                        ? { sku_name: rel.sku_name, code_name: rel.code_name, returnable: rel.returnable }
+                        ? { sku_name: rel.sku_name, code_name: rel.code_name, product_code: rel.product_code ?? null, returnable: rel.returnable }
                         : null,
                 })
             }
@@ -341,7 +342,7 @@ export default function CompletedOrders() {
                                                             <TableBody>
                                                                 {order.warehouse_order_items?.map((item) => (
                                                                     <TableRow key={item.id}>
-                                                                        <TableCell className="font-mono text-xs">{item.products?.code_name}</TableCell>
+                                                                        <TableCell className="font-mono text-xs">{item.products?.product_code || item.products?.code_name}</TableCell>
                                                                         <TableCell>{item.products?.sku_name}</TableCell>
                                                                         <TableCell className="text-right">{item.quantity}</TableCell>
                                                                         <TableCell className="text-right font-medium">---</TableCell>

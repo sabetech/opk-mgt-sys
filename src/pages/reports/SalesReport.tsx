@@ -170,7 +170,7 @@ export default function SalesReport() {
                     created_by_name: order.expand?.created_by?.name || "—",
                     product_id: sale.product_id,
                     product_name: product?.sku_name || "Unknown",
-                    product_code: product?.code_name || "—",
+                    product_code: product?.product_code || product?.code_name || "—",
                     quantity: sale.quantity,
                     returned_qty: returnedQty,
                     refund_amount: refundAmount,

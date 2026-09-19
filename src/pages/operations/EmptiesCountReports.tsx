@@ -124,7 +124,7 @@ export default function EmptiesCountReports() {
                 return {
                     productId: pid,
                     name: product?.sku_name || 'Unknown',
-                    code: product?.code_name || 'N/A',
+                    code: product?.product_code || product?.code_name || 'N/A',
                     systemAtTake: it.system_qty ?? 0,
                     counted: it.physical_qty ?? 0,
                     varianceAtTake: it.variance ?? ((it.physical_qty ?? 0) - (it.system_qty ?? 0)),

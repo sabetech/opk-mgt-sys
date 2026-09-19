@@ -245,6 +245,22 @@ function parseProductsCsv() {
     return products;
 }
 
+// Mirror of src/lib/productCode.ts for seeding: category prefix + per-prefix
+// sequence (ALV P -> ALVP-001, ALVP-002, ...; blank -> PRD-001, ...).
+function buildSeedPrefix(codeName) {
+    const cleaned = (codeName || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return cleaned || 'PRD';
+}
+
+function assignSeedProductCodes(products) {
+    const counters = {};
+    return products.map((p) => {
+        const prefix = buildSeedPrefix(p.code_name);
+        counters[prefix] = (counters[prefix] || 0) + 1;
+        return { ...p, product_code: `${prefix}-${String(counters[prefix]).padStart(3, '0')}` };
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -289,6 +305,9 @@ async function main() {
         fld('text', 'sku_name', { required: true }),
         fld('bool', 'returnable'),
         fld('text', 'code_name'),
+        // Generated unique product code (e.g. ALVP-001). code_name stays as
+        // the shared category label and is intentionally NOT unique.
+        fld('text', 'product_code', { unique: true }),
         fld('number', 'ex_factory_price'),
         fld('number', 'wholesale_price'),
         fld('number', 'retail_price'),
@@ -442,6 +461,18 @@ async function main() {
         fld('relation', 'loadout_id', { collectionId: loadouts.id, required: true, maxSelect: 1, cascadeDelete: true }),
         fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
         fld('number', 'quantity'),
+    ], {}, flags.force);
+
+    // Per-VSE field performance: stock sold to end customers and unsold stock
+    // returned, recorded per VSE per day. Powers the Loadout Summary page
+    // (Quantity Sold / Quantity Returned columns). No warehouse_stock mutation:
+    // stock already left the warehouse via the loadout.
+    await ensureCollection('vse_movements', 'base', [
+        fld('date', 'date', { required: true }),
+        fld('relation', 'vse_id', { collectionId: customers.id, required: true, maxSelect: 1 }),
+        fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
+        fld('number', 'quantity', { required: true }),
+        fld('select', 'movement_type', { required: true, values: ['sold', 'returned'] }),
     ], {}, flags.force);
 
     await ensureCollection('breakages', 'base', [
@@ -619,6 +650,23 @@ async function main() {
         }
     }
 
+    // Add the generated unique product_code to products on existing DBs.
+    // code_name remains the shared category label (not unique).
+    const productsCodeCol = (await pb.collections.getFullList()).find((c) => c.name === 'products');
+    if (productsCodeCol) {
+        const existingFieldNames = productsCodeCol.fields.map((f) => f.name);
+        if (!existingFieldNames.includes('product_code')) {
+            if (!flags.dryRun) {
+                await pb.collections.update(productsCodeCol.id, {
+                    fields: [...productsCodeCol.fields, fld('text', 'product_code', { unique: true })],
+                });
+                console.log('  [ok] added missing field product_code to products');
+            } else {
+                console.log('  [dry-run] would add missing field product_code to products');
+            }
+        }
+    }
+
     await ensureCollection('app_settings', 'base', [
         fld('text', 'key', { required: true, unique: true }),
         { system: false, id: `fld_${Date.now().toString(36)}_${++fieldCounter}`, name: 'value', type: 'json', required: false, unique: false },
@@ -749,7 +797,7 @@ async function main() {
         if (flags.force) {
             await wipeCollectionData('products');
         }
-        const productsToInsert = parseProductsCsv();
+        const productsToInsert = assignSeedProductCodes(parseProductsCsv());
         if (productsToInsert.length > 0 && !flags.dryRun) {
             for (const product of productsToInsert) {
                 await pb.collection('products').create(product);

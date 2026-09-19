@@ -15,6 +15,7 @@ import { pb } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
+import { assignProductCode, displayProductCode } from "@/lib/productCode"
 import ProductDialog from "./ProductDialog"
 import { toast } from "sonner"
 
@@ -59,6 +60,7 @@ export default function Products() {
                 id: product.id,
                 sku_name: product.sku_name,
                 code_name: product.code_name,
+                product_code: product.product_code ?? null,
                 ex_factory_price: product.ex_factory_price,
                 wholesale_price: product.wholesale_price,
                 retail_price: product.retail_price,
@@ -80,7 +82,8 @@ export default function Products() {
     // Filter products
     const filteredProducts = products.filter(product => {
         const matchesSearch = product.sku_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            (product.code_name && product.code_name.toLowerCase().includes(searchTerm.toLowerCase()))
+            (product.code_name && product.code_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+            (product.product_code && product.product_code.toLowerCase().includes(searchTerm.toLowerCase()))
         const matchesFilter = filterReturnable === "all" ||
             (filterReturnable === "returnable" && product.returnable) ||
             (filterReturnable === "non-returnable" && !product.returnable)
@@ -108,10 +111,12 @@ export default function Products() {
     const handleSaveProduct = async (formData: ProductForm) => {
         try {
             if (editingProduct) {
-                // Update existing product
+                // Update existing product (preserve unique code; generate for legacy rows)
+                const product_code = editingProduct.product_code || await assignProductCode(formData.code_name)
                 await pb.collection('products').update(editingProduct.id, {
                     sku_name: formData.sku_name,
                     code_name: formData.code_name || null,
+                    product_code,
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
@@ -121,16 +126,18 @@ export default function Products() {
                 // Update local state
                 setProducts(prev => prev.map(p =>
                     p.id === editingProduct.id
-                        ? { ...p, ...formData, ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null, wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null, retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null }
+                        ? { ...p, ...formData, product_code, ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null, wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null, retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null }
                         : p
                 ))
 
                 alert('✅ Product updated successfully!')
             } else {
                 // Add new product
+                const product_code = await assignProductCode(formData.code_name)
                 const data = await pb.collection('products').create({
                     sku_name: formData.sku_name,
                     code_name: formData.code_name || null,
+                    product_code,
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
@@ -142,6 +149,7 @@ export default function Products() {
                     id: data.id,
                     sku_name: formData.sku_name,
                     code_name: formData.code_name || null,
+                    product_code,
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
@@ -256,7 +264,7 @@ export default function Products() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead>SKU Code</TableHead>
+                            <TableHead className="font-mono">Product Code</TableHead>
                             <TableHead>Product Name</TableHead>
                             <TableHead>Wholesale Price</TableHead>
                             <TableHead>Retail Price</TableHead>
@@ -271,7 +279,7 @@ export default function Products() {
                                 const stockLevel = getStockLevel(product.quantity)
                                 return (
                                     <TableRow key={product.id}>
-                                        <TableCell className="font-medium">{product.code_name || 'N/A'}</TableCell>
+                                        <TableCell className="font-medium font-mono">{displayProductCode(product)}</TableCell>
                                         <TableCell>{product.sku_name}</TableCell>
                                         <TableCell>{formatPrice(product.wholesale_price)}</TableCell>
                                         <TableCell>{formatPrice(product.retail_price)}</TableCell>

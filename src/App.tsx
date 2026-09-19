@@ -17,6 +17,7 @@ import RecordReceivable from "@/pages/warehouse/RecordReceivable"
 import ReceivablesLog from "@/pages/warehouse/ReceivablesLog"
 import InventoryLog from "@/pages/warehouse/InventoryLog"
 import AddLoadout from "@/pages/warehouse/AddLoadout"
+import RecordVSEMovement from "@/pages/warehouse/RecordVSEMovement"
 import Loadout from "@/pages/warehouse/Loadout"
 import TakeStock from "@/pages/warehouse/TakeStock"
 import Breakages from "@/pages/warehouse/Breakages"
@@ -113,6 +114,11 @@ function App() {
                 <Route path="add-loadout" element={
                   <ProtectedRoute allowedRoles={['admin']}>
                     <AddLoadout />
+                  </ProtectedRoute>
+                } />
+                <Route path="record-vse-movement" element={
+                  <ProtectedRoute allowedRoles={['admin']}>
+                    <RecordVSEMovement />
                   </ProtectedRoute>
                 } />
                 <Route path="loadout" element={<Loadout />} />

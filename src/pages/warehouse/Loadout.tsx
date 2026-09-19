@@ -1,6 +1,6 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon } from "lucide-react"
+import { Calendar as CalendarIcon, Loader2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -15,19 +15,113 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
+import { pb, dayFilter } from "@/lib/pocketbase"
+import { toast } from "sonner"
 
-// Mock Data
-const LOADOUT_DATA = [
-    { id: 1, vseName: "John Doe (VSE 1)", given: 500, sold: 450, returned: 50, balance: 0 },
-    { id: 2, vseName: "Sarah Smith (VSE 2)", given: 300, sold: 200, returned: 50, balance: 50 },
-    { id: 3, vseName: "Michael Brown (VSE 3)", given: 450, sold: 400, returned: 40, balance: 10 },
-    { id: 4, vseName: "Emily White (VSE 4)", given: 600, sold: 580, returned: 20, balance: 0 },
-    { id: 5, vseName: "David Wilson (VSE 5)", given: 350, sold: 150, returned: 150, balance: 50 },
-]
+interface VSERow {
+    id: string
+    vseName: string
+    given: number
+    sold: number
+    returned: number
+    balance: number
+}
 
 export default function Loadout() {
     const [date, setDate] = useState<Date | undefined>(new Date())
     const [calendarOpen, setCalendarOpen] = useState(false)
+    const [rows, setRows] = useState<VSERow[]>([])
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        fetchData()
+    }, [date])
+
+    const fetchData = async () => {
+        setLoading(true)
+        try {
+            const target = date ?? new Date()
+
+            // 1. VSE roster: every Retailer (VSE) customer gets a row
+            const typeData = await pb
+                .collection("customer_types")
+                .getFirstListItem('name = "Retailer (VSE)"')
+            const vses = await pb.collection("customers").getFullList({
+                filter: `type_id = "${typeData.id}" && deleted_at = ""`,
+                sort: "name",
+                fields: "id, name",
+            })
+
+            // 2. Approved loadouts for the selected date -> Quantity Given
+            const loadouts = await pb.collection("loadouts").getFullList({
+                filter: `${dayFilter("date", target)} && status = "approved"`,
+                fields: "id, vse_id",
+            })
+            const loadoutIds = loadouts.map((l) => l.id)
+            const givenByVse: Record<string, number> = {}
+            if (loadoutIds.length > 0) {
+                const loadoutItems = await pb
+                    .collection("loadout_items")
+                    .getFullList({
+                        filter: loadoutIds
+                            .map((id) => `loadout_id = "${id}"`)
+                            .join(" || "),
+                        fields: "loadout_id, quantity",
+                    })
+                const vseByLoadout: Record<string, string> = {}
+                for (const l of loadouts) {
+                    vseByLoadout[l.id] = l.vse_id
+                }
+                for (const item of loadoutItems) {
+                    const vseId = vseByLoadout[item.loadout_id]
+                    if (!vseId) continue
+                    givenByVse[vseId] =
+                        (givenByVse[vseId] || 0) + (item.quantity || 0)
+                }
+            }
+
+            // 3. Field movements for the selected date -> Sold / Returned
+            const movements = await pb
+                .collection("vse_movements")
+                .getFullList({
+                    filter: dayFilter("date", target),
+                    fields: "vse_id, quantity, movement_type",
+                })
+            const soldByVse: Record<string, number> = {}
+            const returnedByVse: Record<string, number> = {}
+            for (const m of movements) {
+                if (!m.vse_id) continue
+                if (m.movement_type === "sold") {
+                    soldByVse[m.vse_id] =
+                        (soldByVse[m.vse_id] || 0) + (m.quantity || 0)
+                } else if (m.movement_type === "returned") {
+                    returnedByVse[m.vse_id] =
+                        (returnedByVse[m.vse_id] || 0) + (m.quantity || 0)
+                }
+            }
+
+            setRows(
+                vses.map((vse) => {
+                    const given = givenByVse[vse.id] || 0
+                    const sold = soldByVse[vse.id] || 0
+                    const returned = returnedByVse[vse.id] || 0
+                    return {
+                        id: vse.id,
+                        vseName: vse.name,
+                        given,
+                        sold,
+                        returned,
+                        balance: given - sold - returned,
+                    }
+                })
+            )
+        } catch (error) {
+            console.error("Error fetching loadout summary:", error)
+            toast.error("Failed to load VSE performance")
+        } finally {
+            setLoading(false)
+        }
+    }
 
     return (
         <div className="space-y-6">
@@ -88,20 +182,39 @@ export default function Loadout() {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {LOADOUT_DATA.map((row) => (
-                                <TableRow key={row.id}>
-                                    <TableCell className="font-medium">{row.vseName}</TableCell>
-                                    <TableCell className="text-right">{row.given}</TableCell>
-                                    <TableCell className="text-right">{row.sold}</TableCell>
-                                    <TableCell className="text-right">{row.returned}</TableCell>
-                                    <TableCell className={cn(
-                                        "text-right font-bold",
-                                        row.balance > 0 ? "text-red-500" : "text-green-500"
-                                    )}>
-                                        {row.balance}
+                            {loading ? (
+                                <TableRow>
+                                    <TableCell colSpan={5} className="h-40 text-center">
+                                        <div className="flex flex-col items-center justify-center gap-2">
+                                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                            <p className="text-sm font-medium text-muted-foreground">
+                                                Loading VSE performance...
+                                            </p>
+                                        </div>
                                     </TableCell>
                                 </TableRow>
-                            ))}
+                            ) : rows.length > 0 ? (
+                                rows.map((row) => (
+                                    <TableRow key={row.id}>
+                                        <TableCell className="font-medium">{row.vseName}</TableCell>
+                                        <TableCell className="text-right">{row.given}</TableCell>
+                                        <TableCell className="text-right">{row.sold}</TableCell>
+                                        <TableCell className="text-right">{row.returned}</TableCell>
+                                        <TableCell className={cn(
+                                            "text-right font-bold",
+                                            row.balance > 0 ? "text-red-500" : "text-green-500"
+                                        )}>
+                                            {row.balance}
+                                        </TableCell>
+                                    </TableRow>
+                                ))
+                            ) : (
+                                <TableRow>
+                                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground italic">
+                                        No VSEs found. Add customers of type "Retailer (VSE)" to track performance.
+                                    </TableCell>
+                                </TableRow>
+                            )}
                         </TableBody>
                     </Table>
                 </CardContent>

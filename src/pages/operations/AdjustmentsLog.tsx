@@ -74,7 +74,7 @@ export default function AdjustmentsLog() {
                     date: log.date,
                     type: log.type as "adjustment_increase" | "adjustment_decrease",
                     productName: product?.sku_name || "Unknown",
-                    productCode: product?.code_name || "N/A",
+                    productCode: product?.product_code || product?.code_name || "N/A",
                     quantity: log.quantity,
                     reason: log.reason,
                     reference: log.reference || "N/A",

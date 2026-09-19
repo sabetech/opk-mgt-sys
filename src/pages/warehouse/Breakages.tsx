@@ -105,7 +105,7 @@ export default function Breakages() {
                     date: b.date,
                     quantity: b.quantity,
                     reason: b.reason,
-                    products: rel ? { sku_name: rel.sku_name, code_name: rel.code_name } : null,
+                    products: rel ? { sku_name: rel.sku_name, code_name: rel.product_code || rel.code_name } : null,
                 }
             }))
         } catch (error) {
@@ -156,7 +156,7 @@ export default function Breakages() {
             const transformedProducts: Product[] = data.map((item) => ({
                 id: item.id,
                 name: item.sku_name,
-                code: item.code_name || ''
+                code: item.product_code || item.code_name || ''
             }))
 
             setProducts(transformedProducts)
@@ -188,7 +188,7 @@ export default function Breakages() {
                     date: b.date,
                     quantity: b.quantity,
                     reason: b.reason,
-                    products: rel ? { sku_name: rel.sku_name, code_name: rel.code_name } : null,
+                    products: rel ? { sku_name: rel.sku_name, code_name: rel.product_code || rel.code_name } : null,
                 }
             })
             setRecords(shaped)

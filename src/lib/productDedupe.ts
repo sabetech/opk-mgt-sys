@@ -1,9 +1,9 @@
 import { searchProducts, type SearchableProduct } from "./productSearch";
 
 export interface DuplicateWarning {
-    kind: "exact_code" | "near_dupe_name" | "price_outlier";
+    kind: "near_dupe_name" | "price_outlier";
     message: string;
-    /** ID of the existing product involved (for near-dupe/exact-code). */
+    /** ID of the existing product involved (for near-dupe). */
     existingId?: string;
 }
 
@@ -14,6 +14,10 @@ export function normalizeName(name: string): string {
 /**
  * Warn-only duplicate/quality checks for a product form or CSV row.
  * NEVER merges — callers display warnings and let staff decide.
+ *
+ * NOTE: code_name (SKU Code) is a shared *category* label, not a unique
+ * identifier, so re-use across products is normal and never warned about.
+ * Uniqueness lives in the generated product_code field instead.
  */
 export function checkProductDuplicates(
     candidate: { sku_name: string; code_name?: string | null; wholesale_price?: number | null; retail_price?: number | null },
@@ -22,18 +26,6 @@ export function checkProductDuplicates(
 ): DuplicateWarning[] {
     const warnings: DuplicateWarning[] = [];
     const pool = selfId ? existing.filter((p) => p.id !== selfId) : existing;
-
-    const code = (candidate.code_name || "").trim().toLowerCase();
-    if (code) {
-        const clash = pool.find((p) => (p.code_name || "").trim().toLowerCase() === code);
-        if (clash) {
-            warnings.push({
-                kind: "exact_code",
-                message: `SKU code "${candidate.code_name}" is already used by "${clash.sku_name}".`,
-                existingId: clash.id,
-            });
-        }
-    }
 
     const normCandidate = normalizeName(candidate.sku_name);
     if (normCandidate) {

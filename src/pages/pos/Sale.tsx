@@ -54,6 +54,7 @@ interface Product {
     id: string
     sku_name: string
     code_name: string
+    product_code: string | null
     retail_price: number | null
     wholesale_price: number | null
     returnable?: boolean
@@ -152,12 +153,13 @@ export default function Sale() {
                 const productsData = await pb.collection('products').getFullList({
                     filter: 'deleted_at = ""',
                     sort: 'sku_name',
-                    fields: 'id, sku_name, code_name, retail_price, wholesale_price, returnable'
+                    fields: 'id, sku_name, code_name, product_code, retail_price, wholesale_price, returnable'
                 })
                 setProducts(productsData.map((p) => ({
                     id: p.id,
                     sku_name: p.sku_name,
                     code_name: p.code_name,
+                    product_code: p.product_code ?? null,
                     retail_price: p.retail_price,
                     wholesale_price: p.wholesale_price,
                     returnable: p.returnable,
@@ -237,7 +239,7 @@ export default function Sale() {
             const newItem: CartItem = {
                 id: crypto.randomUUID(),
                 productId: selectedProduct.id,
-                skuCode: selectedProduct.code_name || "N/A",
+                skuCode: selectedProduct.product_code || selectedProduct.code_name || "N/A",
                 productName: selectedProduct.sku_name,
                 quantity: quantity,
                 price: currentUnitPrice,
@@ -595,7 +597,7 @@ export default function Sale() {
                                                             >
                                                                 <div className="flex flex-col flex-1">
                                                                     <span>{p.sku_name}</span>
-                                                                    <span className="text-xs text-muted-foreground">{p.code_name || "No SKU"}</span>
+                                                                    <span className="text-xs text-muted-foreground font-mono">{p.product_code || p.code_name || "No code"}</span>
                                                                 </div>
                                                                 <span className={`text-xs font-medium whitespace-nowrap ${p.quantity <= 0 ? "text-red-500" : "text-muted-foreground"}`}>
                                                                     {p.quantity <= 0 ? "Out of stock" : `Qty: ${p.quantity}`}

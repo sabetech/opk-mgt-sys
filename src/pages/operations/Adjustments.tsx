@@ -109,7 +109,7 @@ export default function Adjustments() {
             const transformedProducts: Product[] = data.map((item) => ({
                 id: item.id,
                 name: item.sku_name,
-                code: item.code_name || ''
+                code: item.product_code || item.code_name || ''
             }))
 
             setProducts(transformedProducts)

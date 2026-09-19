@@ -4,6 +4,8 @@ export interface SearchableProduct {
     id: string;
     sku_name: string;
     code_name?: string | null;
+    /** Generated unique code (e.g. ALVP-001). Matched with top priority. */
+    product_code?: string | null;
 }
 
 export interface ProductMatch {
@@ -14,8 +16,9 @@ export interface ProductMatch {
 
 const FUSE_OPTIONS = {
     keys: [
-        { name: "sku_name", weight: 0.7 },
-        { name: "code_name", weight: 0.3 },
+        { name: "product_code", weight: 0.5 },
+        { name: "sku_name", weight: 0.35 },
+        { name: "code_name", weight: 0.15 },
     ],
     threshold: 0.4,
     ignoreLocation: true,
@@ -28,7 +31,7 @@ export function searchProducts(products: SearchableProduct[], query: string, lim
     const q = query.trim().toLowerCase();
     if (!q) return [];
     const exact = products
-        .filter((p) => p.sku_name.toLowerCase().includes(q) || (p.code_name || "").toLowerCase().includes(q))
+        .filter((p) => p.sku_name.toLowerCase().includes(q) || (p.code_name || "").toLowerCase().includes(q) || (p.product_code || "").toLowerCase().includes(q))
         .map((product) => ({ product, score: 0 }));
     if (exact.length >= limit) return exact.slice(0, limit);
 

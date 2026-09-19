@@ -72,7 +72,7 @@ export default function TakeEmptiesCount() {
             const data = await pb.collection('products').getFullList({
                 filter: 'returnable = true && deleted_at = ""',
                 sort: 'sku_name',
-                fields: 'id, sku_name, code_name',
+                fields: 'id, sku_name, code_name, product_code',
             })
 
             const emptiesData = data.length > 0
@@ -89,7 +89,7 @@ export default function TakeEmptiesCount() {
             setProducts(data.map((p) => ({
                 id: p.id,
                 name: p.sku_name,
-                code: p.code_name || '—',
+                code: p.product_code || p.code_name || '—',
                 systemQty: groundMap[p.id] ?? 0,
             })))
         } catch (error) {

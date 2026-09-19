@@ -51,9 +51,9 @@ export default function Settings() {
                 const productsData = await pb.collection('products').getFullList({
                     filter: 'deleted_at = ""',
                     sort: 'sku_name',
-                    fields: 'id, sku_name, code_name'
+                    fields: 'id, sku_name, code_name, product_code'
                 })
-                setProducts(productsData.map(p => ({ id: p.id, sku_name: p.sku_name, code_name: p.code_name })))
+                setProducts(productsData.map(p => ({ id: p.id, sku_name: p.sku_name, code_name: p.product_code || p.code_name })))
 
                 // Fetch stock thresholds
                 try {

@@ -48,7 +48,7 @@ export default function CratesOverview() {
                 const productsData = await pb.collection('products').getFullList({
                     filter: 'returnable = true',
                     sort: 'sku_name',
-                    fields: 'id, sku_name, code_name'
+                    fields: 'id, sku_name, code_name, product_code'
                 })
 
                 const productIds = productsData.map((p) => p.id)
@@ -70,7 +70,7 @@ export default function CratesOverview() {
                     const mappedProducts: Product[] = productsData.map((item) => ({
                         id: item.id,
                         sku_name: item.sku_name,
-                        code_name: item.code_name,
+                        code_name: item.product_code || item.code_name,
                         full_quantity: stockByProduct[item.id] || 0,
                         empty_quantity: emptiesByProduct[item.id] || 0
                     }))

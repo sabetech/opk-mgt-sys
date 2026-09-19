@@ -76,7 +76,7 @@ async function fetchRequests(status: StatusFilter): Promise<AdjustmentRequest[]>
             return {
                 id: it.id,
                 productName: product?.sku_name || "Unknown",
-                productCode: product?.code_name || "N/A",
+                productCode: product?.product_code || product?.code_name || "N/A",
                 quantity: it.quantity,
             }
         })

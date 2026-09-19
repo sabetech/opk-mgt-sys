@@ -104,6 +104,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Receivables Log", href: "/dashboard/warehouse/receivables-log", roles: ["admin", "auditor"] },
                 { title: "Inventory Log", href: "/dashboard/warehouse/inventory-log", roles: ["admin", "auditor"] },
                 { title: "Add Loadout", href: "/dashboard/warehouse/add-loadout", roles: ["admin"] },
+                { title: "Record VSE Sales / Returns", href: "/dashboard/warehouse/record-vse-movement", roles: ["admin"] },
                 { title: "Loadout", href: "/dashboard/warehouse/loadout", roles: ["admin", "auditor"] },
                 { title: "Take Stock", href: "/dashboard/warehouse/take-stock", roles: ["admin", "operations_manager", "warehouse_manager"] },
                 { title: "Breakages", href: "/dashboard/warehouse/breakages", roles: ["admin", "operations_manager", "warehouse_manager"] },

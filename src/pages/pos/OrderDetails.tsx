@@ -76,6 +76,7 @@ interface SaleItem {
         id: string
         sku_name: string
         code_name: string
+        product_code: string | null
         returnable: boolean
     } | null
 }
@@ -440,7 +441,7 @@ export default function OrderDetails() {
                                             <TableCell>
                                                 <div className="flex flex-col">
                                                     <span className="font-medium">{item.products?.sku_name}</span>
-                                                    <span className="text-xs text-muted-foreground font-mono">{item.products?.code_name}</span>
+                                                    <span className="text-xs text-muted-foreground font-mono">{item.products?.product_code || item.products?.code_name}</span>
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-right">GH₵ {item.unit_price.toFixed(2)}</TableCell>

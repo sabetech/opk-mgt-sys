@@ -71,7 +71,7 @@ export default function OperationsOverview() {
             const returnable = await pb.collection("products").getFullList({
                 filter: 'returnable = true',
                 sort: 'sku_name',
-                fields: "id, sku_name, code_name",
+                fields: "id, sku_name, code_name, product_code",
                 $autoCancel: false,
             })
             const productIds = returnable.map((p) => p.id)
@@ -109,7 +109,7 @@ export default function OperationsOverview() {
                 returnable.map((p: any) => ({
                     id: p.id,
                     skuName: p.sku_name,
-                    codeName: p.code_name ?? null,
+                    codeName: p.product_code || p.code_name || null,
                     fulls: stockByProduct[p.id] || 0,
                     onGround: groundByProduct[p.id] || 0,
                     inTrade: tradeByProduct[p.id] || 0,

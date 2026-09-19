@@ -19,7 +19,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { Calendar } from "@/components/ui/calendar"
-import { pb } from "@/lib/pocketbase"
+import { pb, dayFilter } from "@/lib/pocketbase"
 import { toast } from "sonner"
 
 interface ProductBreakdown {
@@ -39,6 +39,8 @@ interface TruckReload {
 export default function TruckReloadsToGGBL() {
     const [reloadRecords, setReloadRecords] = useState<TruckReload[]>([])
     const [totalStock, setTotalStock] = useState(0)
+    const [dailyReceived, setDailyReceived] = useState(0)
+    const [allTimeBalance, setAllTimeBalance] = useState(0)
     const [loading, setLoading] = useState(true)
     const [selectedDate, setSelectedDate] = useState<Date>(new Date())
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -96,6 +98,68 @@ export default function TruckReloadsToGGBL() {
 
             setReloadRecords(transformed)
 
+            // Returnable products received from GGBL on the selected date.
+            // Balance = empties sent back - returnables brought in. Negative
+            // means OPK owes GGBL empties; positive means a surplus was sent.
+            const receivablesData = await pb
+                .collection("inventory_receivables")
+                .getFullList({
+                    filter: dayFilter("date", selectedDate),
+                    fields: "id",
+                })
+            const receivableIds = receivablesData.map((r) => r.id)
+            let receivedToday = 0
+            if (receivableIds.length > 0) {
+                const receivableItems = await pb
+                    .collection("inventory_receivable_items")
+                    .getFullList({
+                        filter: receivableIds
+                            .map((id) => `receivable_id = "${id}"`)
+                            .join(" || "),
+                        expand: "product_id",
+                    })
+                receivedToday = receivableItems.reduce(
+                    (sum: number, item) =>
+                        sum +
+                        (item.expand?.product_id?.returnable
+                            ? item.qty || 0
+                            : 0),
+                    0
+                )
+            }
+            setDailyReceived(receivedToday)
+
+            // All-time balance (date-independent)
+            const [allSentLogs, returnableProducts] = await Promise.all([
+                pb.collection("empties_log").getFullList({
+                    filter: 'activity = "empties_to_supplier"',
+                    fields: "total_quantity",
+                }),
+                pb.collection("products").getFullList({
+                    filter: "returnable = true",
+                    fields: "id",
+                }),
+            ])
+            const allTimeSent = allSentLogs.reduce(
+                (sum: number, log) => sum + (log.total_quantity || 0),
+                0
+            )
+            const returnableIds = returnableProducts.map((p) => p.id)
+            let allTimeReceived = 0
+            if (returnableIds.length > 0) {
+                const allReturnableItems = await pb
+                    .collection("inventory_receivable_items")
+                    .getFullList({
+                        filter: `product_id in ("${returnableIds.join('","')}")`,
+                        fields: "qty",
+                    })
+                allTimeReceived = allReturnableItems.reduce(
+                    (sum: number, item) => sum + (item.qty || 0),
+                    0
+                )
+            }
+            setAllTimeBalance(allTimeSent - allTimeReceived)
+
             // Fetch total warehouse stock
             const stockData = await pb
                 .collection("warehouse_stock")
@@ -131,6 +195,10 @@ export default function TruckReloadsToGGBL() {
         (sum, r) => sum + r.totalQuantity,
         0
     )
+
+    const dailyBalance = totalSent - dailyReceived
+    const formatSigned = (value: number) =>
+        value > 0 ? `+${value.toLocaleString()}` : value.toLocaleString()
 
     return (
         <div className="space-y-6">
@@ -175,7 +243,7 @@ export default function TruckReloadsToGGBL() {
             </div>
 
             {/* Stats Cards */}
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">
@@ -204,6 +272,29 @@ export default function TruckReloadsToGGBL() {
                         </div>
                         <p className="text-xs text-muted-foreground">
                             Current inventory
+                        </p>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">
+                            Empties Balance (GGBL)
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div
+                            className={cn(
+                                "text-2xl font-bold",
+                                dailyBalance < 0 && "text-red-600",
+                                dailyBalance > 0 && "text-green-600"
+                            )}
+                        >
+                            {formatSigned(dailyBalance)}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            {format(selectedDate, "MMM d, yyyy")} · All-time:{" "}
+                            {formatSigned(allTimeBalance)}
                         </p>
                     </CardContent>
                 </Card>

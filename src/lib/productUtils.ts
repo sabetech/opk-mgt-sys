@@ -55,8 +55,10 @@ export const validateProductForm = (formData: any): Record<string, string> => {
     errors.retail_price = 'Invalid retail price'
   }
   
-  if (formData.code_name && !/^[A-Z0-9]+$/i.test(formData.code_name)) {
-    errors.code_name = 'SKU code must be alphanumeric'
+  // code_name is a shared category label (e.g. "H/L KEG", "B & W") — it is
+  // NOT unique, so only the character set is validated, never uniqueness.
+  if (formData.code_name && !/^[A-Z0-9][A-Z0-9 .\/&'\-]*$/i.test(formData.code_name)) {
+    errors.code_name = "SKU code may contain letters, numbers, spaces and ./&-' characters"
   }
   
   return errors

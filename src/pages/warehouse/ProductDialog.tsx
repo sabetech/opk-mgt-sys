@@ -19,6 +19,7 @@ import {
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { validateProductForm } from "@/lib/productUtils"
 import { checkProductDuplicates, type DuplicateWarning } from "@/lib/productDedupe"
+import { buildProductPrefix } from "@/lib/productCode"
 import { TriangleAlert } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 
@@ -173,15 +174,37 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                     </div>
                     
                     <div className="grid gap-2">
-                        <Label htmlFor="code_name">SKU Code</Label>
+                        <Label htmlFor="code_name">Category / SKU Code</Label>
                         <Input
                             id="code_name"
                             value={formData.code_name}
                             onChange={(e) => handleInputChange('code_name', e.target.value)}
                             className={errors.code_name ? 'border-red-500' : ''}
-                            placeholder="Enter SKU code (optional)"
+                            placeholder="e.g. ALV P (shared category label)"
                         />
                         {errors.code_name && <p className="text-sm text-red-500">{errors.code_name}</p>}
+                        {!errors.code_name && (
+                            <p className="text-xs text-muted-foreground">
+                                Shared family label — repeats across products are normal.
+                                {editingProduct
+                                    ? (editingProduct.product_code
+                                        ? ""
+                                        : " A unique product code will be generated on save.")
+                                    : ` Unique code auto-generated on save (e.g. ${buildProductPrefix(formData.code_name) || "PRD"}-001).`}
+                            </p>
+                        )}
+                    </div>
+
+                    <div className="grid gap-2">
+                        <Label htmlFor="product_code">Product Code (unique)</Label>
+                        <Input
+                            id="product_code"
+                            value={editingProduct?.product_code || ""}
+                            readOnly
+                            disabled
+                            placeholder={editingProduct ? "Will be generated on save" : "Auto-generated on save"}
+                            className="bg-muted font-mono"
+                        />
                     </div>
                     
                     <div className="grid gap-2">

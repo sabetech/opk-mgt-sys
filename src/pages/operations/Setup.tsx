@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { suggestProduct } from "@/lib/productSearch"
+import { assignProductCode, displayProductCode } from "@/lib/productCode"
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "sonner"
 import Papa from "papaparse"
@@ -33,6 +34,7 @@ interface ProductRecord {
   id: string
   sku_name: string
   code_name: string | null
+  product_code: string | null
   wholesale_price: number | null
   retail_price: number | null
   returnable: boolean
@@ -85,6 +87,7 @@ export default function Setup() {
           id: p.id,
           sku_name: p.sku_name,
           code_name: p.code_name,
+          product_code: p.product_code ?? null,
           wholesale_price: p.wholesale_price,
           retail_price: p.retail_price,
           returnable: p.returnable,
@@ -114,6 +117,7 @@ export default function Setup() {
           id: p.id,
           sku_name: p.sku_name,
           code_name: p.code_name,
+          product_code: p.product_code ?? null,
           wholesale_price: p.wholesale_price,
           retail_price: p.retail_price,
           returnable: p.returnable,
@@ -139,7 +143,10 @@ export default function Setup() {
   }, [filterStatus])
 
   const filteredProducts = products.filter((p) => {
-    const matchesSearch = p.sku_name.toLowerCase().includes(searchTerm.toLowerCase())
+    const term = searchTerm.toLowerCase()
+    const matchesSearch = p.sku_name.toLowerCase().includes(term) ||
+      (p.code_name && p.code_name.toLowerCase().includes(term)) ||
+      (p.product_code && p.product_code.toLowerCase().includes(term))
     if (filterStatus === "active") return matchesSearch && !p.deleted_at
     if (filterStatus === "archived") return matchesSearch && !!p.deleted_at
     return matchesSearch
@@ -203,7 +210,7 @@ export default function Setup() {
 
         // Typo-tolerant hint only — row still creates a new product unless staff fixes the CSV.
         const suggestion = suggestProduct(
-          allProducts.map((p) => ({ id: p.id, sku_name: p.sku_name, code_name: (p as any).code_name ?? null })),
+          allProducts.map((p) => ({ id: p.id, sku_name: p.sku_name, code_name: (p as any).code_name ?? null, product_code: (p as any).product_code ?? null })),
           skuName.trim(),
         )
         return { sku_name: skuName.trim(), quantity, rowNumber: index + 2, matched: false, productId: null, suggestion: suggestion?.sku_name ?? null, error: "Product not found - will be created" }
@@ -228,6 +235,7 @@ export default function Setup() {
           const newProduct = await pb.collection("products").create({
             sku_name: row.sku_name,
             code_name: null,
+            product_code: await assignProductCode(null),
             wholesale_price: null,
             retail_price: null,
             returnable: false,
@@ -275,18 +283,22 @@ export default function Setup() {
   const handleSaveProduct = async (formData: ProductForm) => {
     try {
       if (editingProduct) {
+        const product_code = editingProduct.product_code || await assignProductCode(formData.code_name)
         await pb.collection("products").update(editingProduct.id, {
           sku_name: formData.sku_name,
           code_name: formData.code_name || null,
+          product_code,
           wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
           retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
           returnable: formData.returnable,
         })
         toast.success("Product updated successfully!")
       } else {
+        const product_code = await assignProductCode(formData.code_name)
         const data = await pb.collection("products").create({
           sku_name: formData.sku_name,
           code_name: formData.code_name || null,
+          product_code,
           wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
           retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
           returnable: formData.returnable,
@@ -543,7 +555,7 @@ export default function Setup() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SKU Code</TableHead>
+                <TableHead className="font-mono">Product Code</TableHead>
                 <TableHead>Product Name</TableHead>
                 <TableHead>Wholesale</TableHead>
                 <TableHead>Retail</TableHead>
@@ -560,8 +572,8 @@ export default function Setup() {
                     key={product.id}
                     className={product.deleted_at ? "opacity-60" : ""}
                   >
-                    <TableCell className="font-medium">
-                      {product.code_name || "N/A"}
+                    <TableCell className="font-medium font-mono">
+                      {displayProductCode(product)}
                     </TableCell>
                     <TableCell>{product.sku_name}</TableCell>
                     <TableCell>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, Check, ChevronsUpDown, Package, Trash2 } from "lucide-react"
+import { Calendar as CalendarIcon, Check, ChevronsUpDown, Package, Trash2, TrendingUp, Undo2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -30,11 +30,14 @@ import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 
-export default function AddLoadout() {
+type MovementType = "sold" | "returned"
+
+export default function RecordVSEMovement() {
     const [date, setDate] = useState<Date>()
     const [calendarOpen, setCalendarOpen] = useState(false)
     const [vseOpen, setVseOpen] = useState(false)
     const [selectedVse, setSelectedVse] = useState<string>("")
+    const [movementType, setMovementType] = useState<MovementType>("sold")
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([])
 
     // DB State
@@ -107,33 +110,39 @@ export default function AddLoadout() {
             return
         }
 
+        if (selectedItems.some(item => item.quantity <= 0)) {
+            toast.error('Please enter valid quantities for all products')
+            return
+        }
+
         setSaving(true)
         try {
-            // 1. Create Loadout Header
-            const loadout = await pb.collection('loadouts').create({
-                date: date.toISOString().split('T')[0],
-                vse_id: selectedVse,
-                status: 'approved' // Set to approved to trigger stock deduction immediately
-            })
+            const dateStr = date.toISOString().split('T')[0]
 
-            // 2. Create Loadout Items
             for (const item of selectedItems) {
-                await pb.collection('loadout_items').create({
-                    loadout_id: loadout.id,
+                await pb.collection('vse_movements').create({
+                    date: dateStr,
+                    vse_id: selectedVse,
                     product_id: item.productId,
-                    quantity: item.quantity
+                    quantity: item.quantity,
+                    movement_type: movementType,
                 })
             }
 
-            toast.success('Loadout submitted and inventory updated')
+            toast.success(
+                movementType === 'sold'
+                    ? 'VSE sales recorded successfully'
+                    : 'VSE returns recorded successfully'
+            )
 
             // Reset form
             setSelectedVse("")
             setSelectedItems([])
             setDate(undefined)
+            setMovementType("sold")
         } catch (error) {
-            console.error('Error submitting loadout:', error)
-            toast.error('Failed to submit loadout')
+            console.error('Error recording VSE movement:', error)
+            toast.error('Failed to record VSE movement')
         } finally {
             setSaving(false)
         }
@@ -142,9 +151,9 @@ export default function AddLoadout() {
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
             <div className="flex flex-col gap-4">
-                <h2 className="text-3xl font-bold tracking-tight">Add Loadout</h2>
+                <h2 className="text-3xl font-bold tracking-tight">Record VSE Sales / Returns</h2>
                 <p className="text-muted-foreground">
-                    Assign products to VSEs for distribution.
+                    Record products sold or returned by VSEs in the field.
                 </p>
             </div>
 
@@ -153,8 +162,8 @@ export default function AddLoadout() {
                 {/* 1. Date Selector */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Loadout Date</CardTitle>
-                        <CardDescription>Select the date for this shipment.</CardDescription>
+                        <CardTitle>Date</CardTitle>
+                        <CardDescription>Select the date of this activity.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="flex flex-col space-y-2">
@@ -189,8 +198,8 @@ export default function AddLoadout() {
                 {/* 2. VSE Selector */}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Assign VSE</CardTitle>
-                        <CardDescription>Select the VSE receiving the products.</CardDescription>
+                        <CardTitle>Select VSE</CardTitle>
+                        <CardDescription>Select the VSE reporting sales or returns.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <Popover open={vseOpen} onOpenChange={setVseOpen}>
@@ -240,18 +249,50 @@ export default function AddLoadout() {
                 </Card>
             </div>
 
-            {/* 3. Product Selection */}
+            {/* 3. Movement Type */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Activity Type</CardTitle>
+                    <CardDescription>Are these products sold to customers or returned unsold?</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="grid grid-cols-2 gap-3">
+                        <Button
+                            type="button"
+                            variant={movementType === "sold" ? "default" : "outline"}
+                            className="h-12 gap-2"
+                            onClick={() => setMovementType("sold")}
+                        >
+                            <TrendingUp className="h-4 w-4" />
+                            Sold
+                        </Button>
+                        <Button
+                            type="button"
+                            variant={movementType === "returned" ? "default" : "outline"}
+                            className="h-12 gap-2"
+                            onClick={() => setMovementType("returned")}
+                        >
+                            <Undo2 className="h-4 w-4" />
+                            Returned
+                        </Button>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* 4. Product Selection */}
             <Card>
                 <CardHeader>
                     <CardTitle>Product Quantities</CardTitle>
-                    <CardDescription>Enter the quantity of each product to load.</CardDescription>
+                    <CardDescription>
+                        Enter the quantity of each product {movementType === "sold" ? "sold" : "returned"}.
+                    </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     <ProductSelector
                         products={products}
                         selectedItems={selectedItems}
                         onItemsChange={handleItemsChange}
-                        quantityLabel="Quantity to Load"
+                        quantityLabel={movementType === "sold" ? "Quantity Sold" : "Quantity Returned"}
                         disabled={loading || saving}
                     />
 
@@ -261,52 +302,46 @@ export default function AddLoadout() {
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Product Name</TableHead>
-                                    <TableHead className="text-right">Current Stock</TableHead>
-                                    <TableHead className="text-right">Quantity Loaded</TableHead>
+                                    <TableHead className="text-right">
+                                        {movementType === "sold" ? "Quantity Sold" : "Quantity Returned"}
+                                    </TableHead>
                                     <TableHead className="w-[100px]"></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {selectedItems.length > 0 ? (
-                                    selectedItems.map((item: SelectedItem) => {
-                                        // For now, we don't have stock levels in the product object from DB.
-                                        // We'll leave it as N/A or implement a stock fetch if needed later.
-                                        return (
-                                            <TableRow key={item.id}>
-                                                <TableCell className="font-medium">
-                                                    <div className="flex items-center gap-2">
-                                                        <Package className="h-4 w-4 text-muted-foreground" />
-                                                        {item.productName}
-                                                        {item.productCode && (
-                                                            <Badge variant="outline" className="text-xs">
-                                                                {item.productCode}
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                </TableCell>
-                                                <TableCell className="text-right text-muted-foreground">
-                                                    N/A
-                                                </TableCell>
-                                                <TableCell className="text-right font-bold">
-                                                    {item.quantity}
-                                                </TableCell>
-                                                <TableCell className="text-right">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-red-500 hover:text-red-700 hover:bg-red-50"
-                                                        onClick={() => removeItem(item.id)}
-                                                        disabled={saving}
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </TableCell>
-                                            </TableRow>
-                                        )
-                                    })
+                                    selectedItems.map((item: SelectedItem) => (
+                                        <TableRow key={item.id}>
+                                            <TableCell className="font-medium">
+                                                <div className="flex items-center gap-2">
+                                                    <Package className="h-4 w-4 text-muted-foreground" />
+                                                    {item.productName}
+                                                    {item.productCode && (
+                                                        <Badge variant="outline" className="text-xs">
+                                                            {item.productCode}
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="text-right font-bold">
+                                                {item.quantity}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                                    onClick={() => removeItem(item.id)}
+                                                    disabled={saving}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                                        <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
                                             {loading ? "Loading products..." : "No products added yet."}
                                         </TableCell>
                                     </TableRow>
@@ -329,7 +364,7 @@ export default function AddLoadout() {
                 <Button variant="outline" disabled={saving}>Cancel</Button>
                 <Button onClick={handleSubmit} disabled={!date || !selectedVse || selectedItems.length === 0 || saving}>
                     {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {saving ? "Processing..." : "Submit Loadout"}
+                    {saving ? "Processing..." : movementType === "sold" ? "Record Sales" : "Record Returns"}
                 </Button>
             </div>
         </div>
