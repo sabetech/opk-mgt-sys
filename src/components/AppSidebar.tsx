@@ -104,7 +104,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Receivables Log", href: "/dashboard/warehouse/receivables-log", roles: ["admin", "auditor"] },
                 { title: "Inventory Log", href: "/dashboard/warehouse/inventory-log", roles: ["admin", "auditor"] },
                 { title: "Add Loadout", href: "/dashboard/warehouse/add-loadout", roles: ["admin"] },
-                { title: "Record VSE Sales / Returns", href: "/dashboard/warehouse/record-vse-movement", roles: ["admin"] },
+                { title: "Record VSE Returns", href: "/dashboard/warehouse/record-vse-returns", roles: ["admin", "warehouse_manager"] },
                 { title: "Loadout", href: "/dashboard/warehouse/loadout", roles: ["admin", "auditor"] },
                 { title: "Take Stock", href: "/dashboard/warehouse/take-stock", roles: ["admin", "operations_manager", "warehouse_manager"] },
                 { title: "Breakages", href: "/dashboard/warehouse/breakages", roles: ["admin", "operations_manager", "warehouse_manager"] },
@@ -140,6 +140,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Orders", href: "/dashboard/pos/orders", roles: ["admin", "sales_manager", "cashier", "auditor"] },
                 { title: "Add Customer", href: "/dashboard/customers/add", roles: ["admin", "sales_manager", "cashier", "auditor"] },
                 { title: "Manage Products", href: "/dashboard/pos/manage-products", roles: ["admin", "sales_manager"] },
+                { title: "Record VSE Sales", href: "/dashboard/pos/record-vse-sales", roles: ["admin", "sales_manager"] },
             ],
         },
         {

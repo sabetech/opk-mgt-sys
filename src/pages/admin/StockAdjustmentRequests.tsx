@@ -64,8 +64,9 @@ async function fetchRequests(status: StatusFilter): Promise<AdjustmentRequest[]>
     const filter = status === "all" ? "" : `status = "${status}"`
     const requests = await pb.collection("stock_adjustment_requests").getFullList({
         filter: filter || undefined,
-        sort: "-created",
     })
+    // NOTE: sorting by `created` server-side fails on some hosts — sort locally.
+    requests.sort((a, b) => String(b.created).localeCompare(String(a.created)))
 
     const result: AdjustmentRequest[] = []
     for (const r of requests) {

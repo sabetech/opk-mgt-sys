@@ -78,10 +78,11 @@ export default function InventoryLog() {
             })
 
             // 2. Fetch logs for the selected date
+            // NOTE: sorting by `created` server-side fails on some hosts — sort locally.
             const logs = await pb.collection('inventory_logs').getFullList({
                 filter: dayFilter('date', dateStr),
-                sort: 'created'
             })
+            logs.sort((a, b) => String(a.created).localeCompare(String(b.created)))
 
             // 3. Process data
             const processedData: ProductInventory[] = (products || []).map((product) => {

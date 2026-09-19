@@ -3,8 +3,9 @@
 // already have a code).
 //
 // Usage:
-//   PB_SUPERUSER_EMAIL=... PB_SUPERUSER_PASSWORD=... node scripts/backfill-product-codes.js [--dry-run]
-//   PB_URL=... (alias VITE_POCKETBASE_URL, default http://127.0.0.1:8090)
+//   node scripts/backfill-product-codes.js --email=admin@opk.com --password='secret' [--url=...] [--dry-run]
+//   (or PB_SUPERUSER_EMAIL / PB_SUPERUSER_PASSWORD / PB_URL env vars)
+//   PB_URL env alias: VITE_POCKETBASE_URL (default http://127.0.0.1:8090)
 //
 // Requires the `product_code` field migration (setup-pocketbase.js) to have run.
 
@@ -16,12 +17,21 @@ dotenv.config();
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 
-const PB_URL = process.env.PB_URL || process.env.VITE_POCKETBASE_URL || 'http://127.0.0.1:8090';
-const SUPERUSER_EMAIL = process.env.PB_SUPERUSER_EMAIL;
-const SUPERUSER_PASSWORD = process.env.PB_SUPERUSER_PASSWORD;
+function getArg(name) {
+    const arg = args.find((a) => a.startsWith(`--${name}=`));
+    return arg ? arg.split('=')[1] : null;
+}
+
+const PB_URL = getArg('url') || process.env.PB_URL || process.env.VITE_POCKETBASE_URL || 'http://127.0.0.1:8090';
+const SUPERUSER_EMAIL = getArg('email') || process.env.PB_SUPERUSER_EMAIL;
+const SUPERUSER_PASSWORD = getArg('password') || process.env.PB_SUPERUSER_PASSWORD;
 
 if (!SUPERUSER_EMAIL || !SUPERUSER_PASSWORD) {
-    console.error('Error: PB_SUPERUSER_EMAIL and PB_SUPERUSER_PASSWORD env vars are required.');
+    console.error('Error: superuser credentials are required.');
+    console.error('');
+    console.error('Usage:');
+    console.error("  node scripts/backfill-product-codes.js --email=admin@opk.com --password='secret' [--url=...] [--dry-run]");
+    console.error('  or set PB_SUPERUSER_EMAIL and PB_SUPERUSER_PASSWORD env vars.');
     process.exit(1);
 }
 

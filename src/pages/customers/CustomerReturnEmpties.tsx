@@ -85,8 +85,9 @@ export default function CustomerReturnEmpties() {
             try {
                 const data = await pb.collection('crate_deposits').getFullList({
                     filter: `customer_id = "${selectedCustomer}" && (status = "held" || status = "partial")`,
-                    sort: 'created',
                 })
+                // NOTE: sorting by `created` server-side fails on some hosts — sort locally.
+                data.sort((a, b) => String(a.created).localeCompare(String(b.created)))
                 setHeldDeposits(data.map((d) => ({
                     id: d.id,
                     quantity: d.quantity || 0,

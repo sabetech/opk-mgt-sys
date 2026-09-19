@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, Check, ChevronsUpDown, Package, Trash2, TrendingUp, Undo2 } from "lucide-react"
+import { Calendar as CalendarIcon, Check, ChevronsUpDown, Package, Trash2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -25,19 +26,34 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { pb } from "@/lib/pocketbase"
+import { pb, dayFilter } from "@/lib/pocketbase"
 
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
 
-type MovementType = "sold" | "returned"
+export type VSEMovementType = "sold" | "returned"
 
-export default function RecordVSEMovement() {
+interface VSEMovementFormProps {
+    movementType: VSEMovementType
+    title: string
+    description: string
+    quantityLabel: string
+    submitLabel: string
+    successMessage: string
+}
+
+export default function VSEMovementForm({
+    movementType,
+    title,
+    description,
+    quantityLabel,
+    submitLabel,
+    successMessage,
+}: VSEMovementFormProps) {
     const [date, setDate] = useState<Date>()
     const [calendarOpen, setCalendarOpen] = useState(false)
     const [vseOpen, setVseOpen] = useState(false)
     const [selectedVse, setSelectedVse] = useState<string>("")
-    const [movementType, setMovementType] = useState<MovementType>("sold")
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([])
 
     // DB State
@@ -45,6 +61,7 @@ export default function RecordVSEMovement() {
     const [vseList, setVseList] = useState<{ id: string, name: string }[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
+    const [prefilling, setPrefilling] = useState(false)
 
     // Fetch products and VSEs
     useEffect(() => {
@@ -96,12 +113,107 @@ export default function RecordVSEMovement() {
         }
     }
 
+    // Prepopulate from the VSE's approved loadout for the selected date,
+    // minus quantities already recorded as sold/returned that day.
+    // Replaces the item list whenever VSE or date changes.
+    useEffect(() => {
+        if (!selectedVse || !date) return
+        let cancelled = false
+
+        const prefill = async () => {
+            setPrefilling(true)
+            try {
+                // 1. Approved loadouts for this VSE + date -> given per product
+                const loadouts = await pb.collection("loadouts").getFullList({
+                    filter: `${dayFilter("date", date)} && vse_id = "${selectedVse}" && status = "approved"`,
+                    fields: "id",
+                })
+                const loadoutIds = loadouts.map((l) => l.id)
+
+                const givenByProduct: Record<string, number> = {}
+                const metaByProduct: Record<string, { name: string; code: string }> = {}
+                if (loadoutIds.length > 0) {
+                    const loadoutItems = await pb.collection("loadout_items").getFullList({
+                        filter: loadoutIds.map((id) => `loadout_id = "${id}"`).join(" || "),
+                        expand: "product_id",
+                    })
+                    for (const item of loadoutItems) {
+                        const rel = item.expand?.product_id
+                        if (!item.product_id) continue
+                        givenByProduct[item.product_id] =
+                            (givenByProduct[item.product_id] || 0) + (item.quantity || 0)
+                        if (rel && !metaByProduct[item.product_id]) {
+                            metaByProduct[item.product_id] = {
+                                name: rel.sku_name,
+                                code: rel.product_code || rel.code_name || "",
+                            }
+                        }
+                    }
+                }
+
+                // 2. Movements already recorded this VSE + date -> sold/returned per product
+                const movements = await pb.collection("vse_movements").getFullList({
+                    filter: `${dayFilter("date", date)} && vse_id = "${selectedVse}"`,
+                    fields: "product_id, quantity, movement_type",
+                })
+                const accountedByProduct: Record<string, number> = {}
+                for (const m of movements) {
+                    if (!m.product_id) continue
+                    accountedByProduct[m.product_id] =
+                        (accountedByProduct[m.product_id] || 0) + (m.quantity || 0)
+                }
+
+                if (cancelled) return
+
+                // 3. Remainder per product; drop fully-accounted lines
+                const prefilled: SelectedItem[] = Object.entries(givenByProduct)
+                    .map(([productId, given]) => ({
+                        productId,
+                        quantity: given - (accountedByProduct[productId] || 0),
+                    }))
+                    .filter((r) => r.quantity > 0 && metaByProduct[r.productId])
+                    .map((r) => ({
+                        id: crypto.randomUUID(),
+                        productId: r.productId,
+                        productName: metaByProduct[r.productId].name,
+                        productCode: metaByProduct[r.productId].code,
+                        quantity: r.quantity,
+                    }))
+
+                setSelectedItems(prefilled)
+                if (prefilled.length > 0) {
+                    toast.success(`Prepopulated ${prefilled.length} product(s) from loadout`)
+                } else {
+                    toast.info("No outstanding loadout for this VSE on this date")
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    console.error("Error prepopulating from loadout:", error)
+                    toast.error("Failed to load loadout for prepopulation")
+                }
+            } finally {
+                if (!cancelled) setPrefilling(false)
+            }
+        }
+
+        prefill()
+        return () => {
+            cancelled = true
+        }
+    }, [selectedVse, date])
+
     const handleItemsChange = (items: SelectedItem[]) => {
         setSelectedItems(items)
     }
 
     const removeItem = (itemId: string) => {
         setSelectedItems(prev => prev.filter(item => item.id !== itemId))
+    }
+
+    const updateQuantity = (itemId: string, quantity: number) => {
+        setSelectedItems(prev => prev.map(item =>
+            item.id === itemId ? { ...item, quantity } : item
+        ))
     }
 
     const handleSubmit = async () => {
@@ -129,17 +241,12 @@ export default function RecordVSEMovement() {
                 })
             }
 
-            toast.success(
-                movementType === 'sold'
-                    ? 'VSE sales recorded successfully'
-                    : 'VSE returns recorded successfully'
-            )
+            toast.success(successMessage)
 
             // Reset form
             setSelectedVse("")
             setSelectedItems([])
             setDate(undefined)
-            setMovementType("sold")
         } catch (error) {
             console.error('Error recording VSE movement:', error)
             toast.error('Failed to record VSE movement')
@@ -151,9 +258,9 @@ export default function RecordVSEMovement() {
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
             <div className="flex flex-col gap-4">
-                <h2 className="text-3xl font-bold tracking-tight">Record VSE Sales / Returns</h2>
+                <h2 className="text-3xl font-bold tracking-tight">{title}</h2>
                 <p className="text-muted-foreground">
-                    Record products sold or returned by VSEs in the field.
+                    {description}
                 </p>
             </div>
 
@@ -199,7 +306,7 @@ export default function RecordVSEMovement() {
                 <Card>
                     <CardHeader>
                         <CardTitle>Select VSE</CardTitle>
-                        <CardDescription>Select the VSE reporting sales or returns.</CardDescription>
+                        <CardDescription>Select the VSE reporting this activity.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         <Popover open={vseOpen} onOpenChange={setVseOpen}>
@@ -249,51 +356,27 @@ export default function RecordVSEMovement() {
                 </Card>
             </div>
 
-            {/* 3. Movement Type */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Activity Type</CardTitle>
-                    <CardDescription>Are these products sold to customers or returned unsold?</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid grid-cols-2 gap-3">
-                        <Button
-                            type="button"
-                            variant={movementType === "sold" ? "default" : "outline"}
-                            className="h-12 gap-2"
-                            onClick={() => setMovementType("sold")}
-                        >
-                            <TrendingUp className="h-4 w-4" />
-                            Sold
-                        </Button>
-                        <Button
-                            type="button"
-                            variant={movementType === "returned" ? "default" : "outline"}
-                            className="h-12 gap-2"
-                            onClick={() => setMovementType("returned")}
-                        >
-                            <Undo2 className="h-4 w-4" />
-                            Returned
-                        </Button>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* 4. Product Selection */}
+            {/* 3. Product Selection */}
             <Card>
                 <CardHeader>
                     <CardTitle>Product Quantities</CardTitle>
                     <CardDescription>
-                        Enter the quantity of each product {movementType === "sold" ? "sold" : "returned"}.
+                        Enter the quantity of each product.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    {prefilling && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading loadout for prepopulation...
+                        </div>
+                    )}
                     <ProductSelector
                         products={products}
                         selectedItems={selectedItems}
                         onItemsChange={handleItemsChange}
-                        quantityLabel={movementType === "sold" ? "Quantity Sold" : "Quantity Returned"}
-                        disabled={loading || saving}
+                        quantityLabel={quantityLabel}
+                        disabled={loading || saving || prefilling}
                     />
 
                     {/* Items List */}
@@ -303,7 +386,7 @@ export default function RecordVSEMovement() {
                                 <TableRow>
                                     <TableHead>Product Name</TableHead>
                                     <TableHead className="text-right">
-                                        {movementType === "sold" ? "Quantity Sold" : "Quantity Returned"}
+                                        {quantityLabel}
                                     </TableHead>
                                     <TableHead className="w-[100px]"></TableHead>
                                 </TableRow>
@@ -317,14 +400,21 @@ export default function RecordVSEMovement() {
                                                     <Package className="h-4 w-4 text-muted-foreground" />
                                                     {item.productName}
                                                     {item.productCode && (
-                                                        <Badge variant="outline" className="text-xs">
+                                                        <Badge variant="outline" className="text-xs font-mono">
                                                             {item.productCode}
                                                         </Badge>
                                                     )}
                                                 </div>
                                             </TableCell>
-                                            <TableCell className="text-right font-bold">
-                                                {item.quantity}
+                                            <TableCell className="text-right">
+                                                <Input
+                                                    type="number"
+                                                    min={0}
+                                                    value={item.quantity}
+                                                    onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
+                                                    disabled={saving || prefilling}
+                                                    className="w-20 ml-auto text-right font-bold h-8"
+                                                />
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <Button
@@ -362,9 +452,9 @@ export default function RecordVSEMovement() {
 
             <div className="flex justify-end gap-3">
                 <Button variant="outline" disabled={saving}>Cancel</Button>
-                <Button onClick={handleSubmit} disabled={!date || !selectedVse || selectedItems.length === 0 || saving}>
+                <Button onClick={handleSubmit} disabled={!date || !selectedVse || selectedItems.length === 0 || saving || prefilling}>
                     {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {saving ? "Processing..." : movementType === "sold" ? "Record Sales" : "Record Returns"}
+                    {saving ? "Processing..." : submitLabel}
                 </Button>
             </div>
         </div>
