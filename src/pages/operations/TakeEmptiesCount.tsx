@@ -17,7 +17,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "sonner"
 
@@ -75,12 +75,9 @@ export default function TakeEmptiesCount() {
                 fields: 'id, sku_name, code_name, product_code',
             })
 
-            const emptiesData = data.length > 0
-                ? await pb.collection('empties').getFullList({
-                    filter: data.map((p) => `product_id = "${p.id}"`).join(' || '),
-                    fields: 'product_id, quantity_on_ground',
-                })
-                : []
+            const emptiesData = await getFullListInBatches('empties', 'product_id', data.map((p) => p.id), {
+                fields: 'product_id, quantity_on_ground',
+            })
             const groundMap: Record<string, number> = {}
             for (const e of emptiesData) {
                 groundMap[e.product_id] = e.quantity_on_ground || 0

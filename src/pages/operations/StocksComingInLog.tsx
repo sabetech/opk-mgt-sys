@@ -21,7 +21,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { toast } from "sonner"
 import React from "react"
 
@@ -79,12 +79,9 @@ export default function StocksComingInLog() {
             })
 
             const receivableIds = data.map((r) => r.id)
-            const itemsData = receivableIds.length > 0
-                ? await pb.collection('inventory_receivable_items').getFullList({
-                    filter: receivableIds.map(id => `receivable_id = "${id}"`).join(' || '),
-                    expand: 'product_id',
-                })
-                : []
+            const itemsData = await getFullListInBatches('inventory_receivable_items', 'receivable_id', receivableIds, {
+                expand: 'product_id',
+            })
 
             const itemsByReceivable: Record<string, any[]> = {}
             for (const item of itemsData) {

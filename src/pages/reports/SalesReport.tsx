@@ -45,7 +45,7 @@ import {
 import { DateRangePicker } from "@/components/ui/date-range-picker"
 import type { RangeKeyDict, Range } from "react-date-range"
 
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { toast } from "sonner"
 import AskData from "@/components/AskData"
@@ -120,17 +120,16 @@ export default function SalesReport() {
                 return
             }
 
-            // Fetch sale items for all orders with product expand
+            // Fetch sale items for all orders with product expand (batched: order
+            // lists grow with the date range and one giant filter breaks prod)
             const orderIds = ordersData.map((o) => o.id)
-            const salesData = await pb.collection('sales').getFullList({
-                filter: orderIds.map((oid) => `order_id = "${oid}"`).join(' || '),
+            const salesData = await getFullListInBatches('sales', 'order_id', orderIds, {
                 expand: 'product_id',
                 $autoCancel: false,
             })
 
             // Fetch return records for all orders in range
-            const returnsData = await pb.collection('returns').getFullList({
-                filter: orderIds.map((oid) => `order_id = "${oid}"`).join(' || '),
+            const returnsData = await getFullListInBatches('returns', 'order_id', orderIds, {
                 $autoCancel: false,
             })
 

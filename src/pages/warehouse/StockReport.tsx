@@ -18,7 +18,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 
 // Types
 type StockStatus = 'good' | 'low' | 'out'
@@ -76,9 +76,8 @@ export default function StockReport() {
                 sort: 'sku_name'
             })
 
-            // Fetch actual warehouse stock quantities
-            const stockData = await pb.collection('warehouse_stock').getFullList({
-                filter: data.map(p => `product_id = "${p.id}"`).join(' || '),
+            // Fetch actual warehouse stock quantities (batched: full catalog filter)
+            const stockData = await getFullListInBatches('warehouse_stock', 'product_id', data.map((p) => p.id), {
                 fields: 'product_id, quantity',
             })
 

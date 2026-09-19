@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Trash2, Search, Plus, Edit2 } from "lucide-react"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
 import { formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
@@ -43,9 +43,8 @@ export default function Products() {
                 sort: 'sku_name'
             })
 
-            // Fetch actual warehouse stock quantities
-            const stockData = await pb.collection('warehouse_stock').getFullList({
-                filter: data.map(p => `product_id = "${p.id}"`).join(' || '),
+            // Fetch actual warehouse stock quantities (batched: full catalog filter)
+            const stockData = await getFullListInBatches('warehouse_stock', 'product_id', data.map((p) => p.id), {
                 fields: 'product_id, quantity',
             })
 

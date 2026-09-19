@@ -17,7 +17,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import { toast } from "sonner"
 
@@ -59,8 +59,7 @@ export default function TakeStock() {
             setProducts(transformedProducts)
 
             if (data.length > 0) {
-                const stockData = await pb.collection('warehouse_stock').getFullList({
-                    filter: data.map((p) => `product_id = "${p.id}"`).join(' || '),
+                const stockData = await getFullListInBatches('warehouse_stock', 'product_id', data.map((p) => p.id), {
                     fields: 'product_id, quantity',
                 })
                 const map: Record<string, number> = {}

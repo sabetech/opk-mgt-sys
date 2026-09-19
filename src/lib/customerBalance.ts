@@ -1,4 +1,4 @@
-import { pb } from "./pocketbase";
+import { getFullListInBatches } from "./pocketbase";
 
 export interface CustomerBalance {
     /** Stored opening balance (customers.balance) — set at creation/import. */
@@ -29,8 +29,8 @@ export async function fetchCustomerBalances(
     }
     if (ids.length === 0) return result;
 
-    const logs = await pb.collection("empties_log").getFullList({
-        filter: ids.map((id) => `customer_id = "${id}"`).join(" || "),
+    // Chunked fan-out: one giant `||` filter exceeds URL limits behind proxies.
+    const logs = await getFullListInBatches("empties_log", "customer_id", ids, {
         fields: "customer_id, activity, total_quantity",
     });
     for (const log of logs) {
