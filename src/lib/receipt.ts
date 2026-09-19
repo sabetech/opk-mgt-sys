@@ -140,9 +140,8 @@ export function generateProformaReference(date = new Date()): string {
 }
 
 /**
- * Builds a standalone proforma invoice document (same thermal layout as the
- * sales receipt). A proforma is a quote only: it records nothing, changes no
- * stock, and must never be confused with a sale — hence the banner.
+ * Builds a standalone A4 proforma invoice document (quote only: it records
+ * nothing, changes no stock, and must never be confused with a sale).
  */
 export function buildProformaHtml(proforma: ProformaInvoice): string {
     const itemRows = proforma.items
@@ -153,63 +152,60 @@ export function buildProformaHtml(proforma: ProformaInvoice): string {
                     ? `<div class="muted">incl. GHc ${formatMoney(item.surcharge)} surcharge</div>`
                     : ""
             return `<tr>
-                <td class="item">${index + 1}. ${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.skuCode)}</div>${surchargeNote}</td>
-            </tr>
-            <tr>
-                <td class="line"><span>${item.quantity} x ${formatMoney(unitPrice)}</span><span>${formatMoney(item.total)}</span></td>
+                <td class="center">${index + 1}</td>
+                <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.skuCode)}</div>${surchargeNote}</td>
+                <td class="right">${item.quantity}</td>
+                <td class="right">GHc ${formatMoney(unitPrice)}</td>
+                <td class="right">GHc ${formatMoney(item.total)}</td>
             </tr>`
         })
         .join("")
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Proforma ${escapeHtml(proforma.reference)}</title>
 <style>
-@page { size: 80mm auto; margin: 0; }
+@page { size: A4; margin: 12mm; }
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; background: #fff; }
-body {
-    width: 72mm;
-    margin: 0 auto;
-    padding: 2mm 1mm 6mm;
-    font-family: "Courier New", Courier, monospace;
-    font-size: 12px;
-    line-height: 1.45;
-    color: #000;
-}
+body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 0; }
+.company { font-size: 18px; font-weight: bold; }
+h2 { margin: 4px 0; font-size: 22px; }
+.notice { border: 2px solid #000; padding: 8px; margin: 12px 0; text-align: center; font-weight: bold; font-size: 13px; }
+.meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; margin: 12px 0; }
+.meta-grid div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dotted #ccc; padding: 2px 0; }
+.muted { color: #555; font-size: 11px; }
+table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
+th { background: #f0f0f0; font-weight: bold; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+.right { text-align: right; }
 .center { text-align: center; }
-.company { font-size: 15px; font-weight: bold; }
-.divider { border-top: 1px dashed #000; margin: 6px 0; }
-table { width: 100%; border-collapse: collapse; }
-td { padding: 1px 0; vertical-align: top; word-wrap: break-word; }
-.item { font-weight: bold; }
-.muted { font-weight: normal; font-size: 11px; }
-.line { display: flex; justify-content: space-between; gap: 8px; }
-.totals { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; }
-.grand { font-size: 15px; }
-.meta { display: flex; justify-content: space-between; gap: 8px; }
-.notice { border: 1px solid #000; padding: 4px; margin: 6px 0; text-align: center; font-weight: bold; }
-@media print {
-    body { width: 72mm; margin: 0 auto; }
-}
+.totals { margin-top: 12px; margin-left: auto; width: 60%; }
+.totals div { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; }
+.grand { font-size: 16px; font-weight: bold; border-top: 2px solid #000; margin-top: 4px; padding-top: 6px; }
+.footer { margin-top: 24px; text-align: center; color: #444; }
+@media print { body { margin: 0; } }
 </style></head><body>
-<div class="center company">OPPONG KYEKYEKU<br />DISTRIBUTION LTD</div>
-<div class="center">*** PROFORMA INVOICE ***</div>
+<div class="company">OPPONG KYEKYEKU DISTRIBUTION LTD</div>
+<h2>Proforma Invoice</h2>
 <div class="notice">QUOTE ONLY — NOT A SALE<br />NO STOCK OR PAYMENT RECORDED</div>
-<div class="divider"></div>
-<div class="meta"><span>Ref No:</span><span><strong>${escapeHtml(proforma.reference)}</strong></span></div>
-<div class="meta"><span>Date:</span><span>${formatDateTime(proforma.dateTime)}</span></div>
-<div class="meta"><span>Customer:</span><span><strong>${escapeHtml(proforma.customerName)}</strong></span></div>
-${proforma.customerType ? `<div class="meta"><span>Cust. Type:</span><span>${escapeHtml(proforma.customerType)}</span></div>` : ""}
-<div class="meta"><span>Payment:</span><span>${escapeHtml(proforma.paymentType.replace(/_/g, " "))}</span></div>
-${proforma.servedBy ? `<div class="meta"><span>Served by:</span><span>${escapeHtml(proforma.servedBy)}</span></div>` : ""}
-<div class="divider"></div>
-<table><tbody>${itemRows}</tbody></table>
-<div class="divider"></div>
-<div class="totals"><span>Total Qty:</span><span>${proforma.totalQuantity}</span></div>
-<div class="totals"><span>Subtotal:</span><span>GHc ${formatMoney(proforma.subtotal)}</span></div>
-${(proforma.crateDepositQty ?? 0) > 0 ? `<div class="totals"><span>Crate deposit (${proforma.crateDepositQty} x ${formatMoney(proforma.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(proforma.crateDepositTotal ?? 0)}</span></div>` : ""}
-<div class="totals grand"><span>TOTAL:</span><span>GHc ${formatMoney(proforma.grandTotal)}</span></div>
-<div class="divider"></div>
-<div class="center">Thank you for your patronage!</div>
+<div class="meta-grid">
+<div><span>Ref No:</span><span><strong>${escapeHtml(proforma.reference)}</strong></span></div>
+<div><span>Date:</span><span>${formatDateTime(proforma.dateTime)}</span></div>
+<div><span>Customer:</span><span><strong>${escapeHtml(proforma.customerName)}</strong></span></div>
+${proforma.customerType ? `<div><span>Cust. Type:</span><span>${escapeHtml(proforma.customerType)}</span></div>` : ""}
+<div><span>Payment:</span><span>${escapeHtml(proforma.paymentType.replace(/_/g, " "))}</span></div>
+${proforma.servedBy ? `<div><span>Served by:</span><span>${escapeHtml(proforma.servedBy)}</span></div>` : ""}
+</div>
+<table><thead><tr>
+<th class="center">#</th><th>Product</th><th class="right">Qty</th><th class="right">Unit Price</th><th class="right">Line Total</th>
+</tr></thead><tbody>${itemRows || `<tr><td colspan="5" class="center">No items.</td></tr>`}</tbody></table>
+<div class="totals">
+<div><span>Total Qty:</span><span>${proforma.totalQuantity}</span></div>
+<div><span>Subtotal:</span><span>GHc ${formatMoney(proforma.subtotal)}</span></div>
+${(proforma.crateDepositQty ?? 0) > 0 ? `<div><span>Crate deposit (${proforma.crateDepositQty} x ${formatMoney(proforma.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(proforma.crateDepositTotal ?? 0)}</span></div>` : ""}
+<div class="grand"><span>TOTAL:</span><span>GHc ${formatMoney(proforma.grandTotal)}</span></div>
+</div>
+<div class="footer">Thank you for your patronage!</div>
 </body></html>`
 }
 
