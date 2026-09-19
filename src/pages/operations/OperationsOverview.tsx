@@ -69,7 +69,7 @@ export default function OperationsOverview() {
         setEmptiesLoading(true)
         try {
             const returnable = await pb.collection("products").getFullList({
-                filter: 'returnable = true',
+                filter: 'returnable = true && deleted_at = ""',
                 sort: 'sku_name',
                 fields: "id, sku_name, code_name, product_code",
                 $autoCancel: false,

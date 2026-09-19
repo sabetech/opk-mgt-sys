@@ -122,6 +122,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Reload Truck with Empties", href: "/dashboard/operations/reload-truck-empties", roles: ["admin", "operations_manager"] },
                 { title: "Adjustments", href: "/dashboard/operations/adjustments", roles: ["admin", "operations_manager", "warehouse_manager"] },
                 { title: "Adjustment Requests", href: "/dashboard/operations/adjustment-requests", roles: ["admin", "operations_manager", "warehouse_manager", "auditor"] },
+                { title: "Stock Adjustment Requests", href: "/dashboard/admin/stock-adjustment-requests", roles: ["admin", "sales_manager", "operations_manager"] },
                 { title: "Stocks Coming In Log", href: "/dashboard/operations/stocks-coming-in-log", roles: ["admin", "operations_manager", "auditor"] },
                 { title: "Truck Reloads to GGBL", href: "/dashboard/operations/truck-reloads-to-ggbl", roles: ["admin", "operations_manager", "auditor"] },
                 { title: "Adjustments Log", href: "/dashboard/operations/adjustments-log", roles: ["admin", "operations_manager", "auditor", "sales_manager"] },
@@ -160,7 +161,6 @@ export function AppSidebar({ className }: SidebarProps) {
             children: [
                 { title: "Add User", href: "/dashboard/admin/add-user", roles: ["admin"] },
                 { title: "Settings", href: "/dashboard/admin/settings", roles: ["admin"] },
-                { title: "Stock Adjustment Requests", href: "/dashboard/admin/stock-adjustment-requests", roles: ["admin"] },
             ],
         },
     ]

@@ -226,17 +226,19 @@ function parseProductsCsv() {
         skipEmptyLines: true,
         complete: (results) => {
             const rows = results.data;
-            const dataRows = rows.slice(2);
+            const dataRows = rows.slice(1);
             products = dataRows
                 .map((row) => {
                     const skuName = row[0]?.trim();
-                    if (!skuName) return null;
+                    if (!skuName || skuName === 'SKU NAME') return null;
                     return {
                         sku_name: skuName,
                         returnable: (row[1]?.trim() || '').toLowerCase() === 'returnable',
                         code_name: row[2]?.trim() || null,
                         wholesale_price: parseFloat((row[3]?.trim() || '0').replace(/,/g, '')),
                         retail_price: parseFloat((row[4]?.trim() || '0').replace(/,/g, '')),
+                        ex_factory_price: parseFloat((row[5]?.trim() || '0').replace(/,/g, '')),
+                        product_code: row[6]?.trim() || null,
                     };
                 })
                 .filter((p) => p !== null);

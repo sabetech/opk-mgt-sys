@@ -105,6 +105,9 @@ async function fetchRequests(status: StatusFilter): Promise<AdjustmentRequest[]>
 
 export default function StockAdjustmentRequests() {
     const { profile } = useAuth()
+    // Viewing is open to sales/operations managers; approving stays admin-only
+    // (also enforced by the collection API rules server-side).
+    const isAdmin = profile?.role === "admin"
     const [filter, setFilter] = useState<StatusFilter>("pending")
     const [requests, setRequests] = useState<AdjustmentRequest[]>([])
     const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 })
@@ -175,6 +178,10 @@ export default function StockAdjustmentRequests() {
             toast.error("User not authenticated")
             return
         }
+        if (profile.role !== "admin") {
+            toast.error("Only admins can approve adjustment requests")
+            return
+        }
         setActionLoading(true)
         try {
             await approveAdjustmentRequest(actionId, profile.full_name || profile.id)
@@ -194,6 +201,10 @@ export default function StockAdjustmentRequests() {
         if (!actionId) return
         if (!profile) {
             toast.error("User not authenticated")
+            return
+        }
+        if (profile.role !== "admin") {
+            toast.error("Only admins can reject adjustment requests")
             return
         }
         setActionLoading(true)
@@ -224,6 +235,7 @@ export default function StockAdjustmentRequests() {
                 <h2 className="text-3xl font-bold tracking-tight">Stock Adjustment Requests</h2>
                 <p className="text-muted-foreground">
                     Review pending upward/downward adjustments. Stock changes only after approval.
+                    {!isAdmin && " Approval is done by an admin."}
                 </p>
             </div>
 
@@ -366,24 +378,30 @@ export default function StockAdjustmentRequests() {
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {req.status === "pending" ? (
-                                                <div className="flex justify-end gap-2">
-                                                    <Button
-                                                        size="sm"
-                                                        className="bg-green-700 hover:bg-green-800"
-                                                        onClick={() => openApprove(req.id)}
-                                                    >
-                                                        <Check className="h-4 w-4 mr-1" />
-                                                        Approve
-                                                    </Button>
-                                                    <Button
-                                                        size="sm"
-                                                        variant="destructive"
-                                                        onClick={() => openReject(req.id)}
-                                                    >
-                                                        <X className="h-4 w-4 mr-1" />
-                                                        Cancel
-                                                    </Button>
-                                                </div>
+                                                isAdmin ? (
+                                                    <div className="flex justify-end gap-2">
+                                                        <Button
+                                                            size="sm"
+                                                            className="bg-green-700 hover:bg-green-800"
+                                                            onClick={() => openApprove(req.id)}
+                                                        >
+                                                            <Check className="h-4 w-4 mr-1" />
+                                                            Approve
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="destructive"
+                                                            onClick={() => openReject(req.id)}
+                                                        >
+                                                            <X className="h-4 w-4 mr-1" />
+                                                            Cancel
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground italic">
+                                                        Awaiting admin approval
+                                                    </span>
+                                                )
                                             ) : (
                                                 <span className="text-xs text-muted-foreground">
                                                     {req.reviewedBy

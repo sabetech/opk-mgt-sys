@@ -240,8 +240,15 @@ function App() {
                 <Route path="manage-users" element={<ManageUsers />} />
                 <Route path="add-user" element={<AddUser />} />
                 <Route path="settings" element={<Settings />} />
-                <Route path="stock-adjustment-requests" element={<StockAdjustmentRequests />} />
               </Route>
+
+              {/* Stock adjustment approvals: viewable beyond admin, but only
+                  admins can approve/reject (also enforced by API rules). */}
+              <Route path="admin/stock-adjustment-requests" element={
+                <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'operations_manager']}>
+                  <StockAdjustmentRequests />
+                </ProtectedRoute>
+              } />
             </Route>
           </Routes>
         </AuthProvider>
