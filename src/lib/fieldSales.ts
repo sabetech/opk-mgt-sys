@@ -296,6 +296,7 @@ export async function tryValidateAndPost(saleId: string): Promise<boolean> {
             vse_id: vseId,
             product_id: item.product_id,
             quantity: item.quantity,
+            movement_type: 'sold',
         })
     }
 
@@ -320,6 +321,7 @@ export async function tryValidateAndPost(saleId: string): Promise<boolean> {
                     vse_id: vseId,
                     product_id: shares[idx].item.product_id,
                     quantity: qty,
+                    movement_type: 'returned',
                 })
             }
         }

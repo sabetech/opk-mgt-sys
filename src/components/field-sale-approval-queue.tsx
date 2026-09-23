@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Loader2, Check, X, ChevronDown, ChevronUp } from "lucide-react"
+import { Loader2, Check, X, ChevronDown, ChevronUp, RotateCcw } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -29,6 +29,7 @@ import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import {
     approveFieldSaleDimension,
     rejectFieldSaleDimension,
+    tryValidateAndPost,
     type FieldSaleDimension,
     type FieldSaleStatus,
 } from "@/lib/fieldSales"
@@ -149,6 +150,28 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
             toast.error(error?.message || 'Failed to approve')
         } finally {
             setActionLoading(false)
+        }
+    }
+
+    // Recovery for records approved on both sides before posting succeeded
+    // (e.g. a posting failure left them approved but unposted).
+    const handleRetryPost = async (saleId: string) => {
+        setActionId(saleId)
+        setActionLoading(true)
+        try {
+            const validated = await tryValidateAndPost(saleId)
+            if (validated) {
+                toast.success("Posted to Loadout Summary")
+            } else {
+                toast.info("Not fully approved yet — nothing posted")
+            }
+            await fetchQueue()
+        } catch (error: any) {
+            console.error('Retry posting failed:', error)
+            toast.error(error?.message || 'Posting failed')
+        } finally {
+            setActionLoading(false)
+            setActionId(null)
         }
     }
 
@@ -299,6 +322,22 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                                             <X className="h-4 w-4 mr-1" /> Reject
                                                         </Button>
                                                     </div>
+                                                ) : row.sale_status === "approved" &&
+                                                  row.empties_status === "approved" &&
+                                                  !row.posted_to_summary ? (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        onClick={() => handleRetryPost(row.id)}
+                                                        disabled={actionLoading}
+                                                    >
+                                                        {actionLoading ? (
+                                                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                                        ) : (
+                                                            <RotateCcw className="h-4 w-4 mr-1" />
+                                                        )}
+                                                        Retry posting
+                                                    </Button>
                                                 ) : (
                                                     <span className="text-xs text-muted-foreground">—</span>
                                                 )}
