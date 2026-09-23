@@ -486,6 +486,54 @@ async function main() {
 
     const { users } = await getCollectionsMap();
 
+    // VSE field sales (recorded in the field by VSE logins, dual approval).
+    // sale_status is approved by account_manager, empties_status by
+    // empties_manager; both approved => validated => auto-posted to the
+    // Loadout Summary. Never touches warehouse_stock (stock left at loadout).
+    // NOTE: this server's PocketBase build rejects @request.data in rules, so
+    // approval-field locking is enforced in the app/lib layer (reviewed_by
+    // audit trail) rather than in API rules.
+    const VSE_OWNER = '@request.auth.id = created_by';
+    const VSE_EDITABLE = 'posted_to_summary = false';
+    await ensureCollection('vse_field_sales', 'base', [
+        fld('date', 'date', { required: true }),
+        fld('relation', 'vse_customer_id', { collectionId: customers.id, required: true, maxSelect: 1 }),
+        fld('relation', 'created_by', { collectionId: users.id, required: true, maxSelect: 1 }),
+        fld('text', 'reference', { required: true, unique: true }),
+        fld('number', 'empties_received', { required: true }),
+        fld('select', 'sale_status', { required: true, values: ['pending', 'approved', 'rejected'] }),
+        fld('text', 'sale_reviewed_by'),
+        fld('date', 'sale_reviewed_at'),
+        fld('text', 'sale_reject_reason'),
+        fld('select', 'empties_status', { required: true, values: ['pending', 'approved', 'rejected'] }),
+        fld('text', 'empties_reviewed_by'),
+        fld('date', 'empties_reviewed_at'),
+        fld('text', 'empties_reject_reason'),
+        fld('bool', 'posted_to_summary'),
+    ], {
+        listRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || ${VSE_OWNER}`,
+        viewRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || ${VSE_OWNER}`,
+        createRule: `${ADMIN_RULE} || @request.auth.role = "vse"`,
+        updateRule: `${ADMIN_RULE} || (@request.auth.role = "vse" && ${VSE_OWNER} && ${VSE_EDITABLE}) || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager"`,
+        deleteRule: `${ADMIN_RULE} || (@request.auth.role = "vse" && ${VSE_OWNER} && ${VSE_EDITABLE})`,
+    }, flags.force);
+
+    const { vse_field_sales } = await getCollectionsMap();
+
+    await ensureCollection('vse_field_sale_items', 'base', [
+        fld('relation', 'sale_id', { collectionId: vse_field_sales.id, required: true, maxSelect: 1, cascadeDelete: true }),
+        fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
+        fld('number', 'quantity', { required: true }),
+        fld('number', 'unit_price', { required: true }),
+        fld('number', 'sub_total', { required: true }),
+    ], {
+        listRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || sale_id.created_by = @request.auth.id`,
+        viewRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || sale_id.created_by = @request.auth.id`,
+        createRule: `${ADMIN_RULE} || @request.auth.role = "vse"`,
+        updateRule: `${ADMIN_RULE} || (@request.auth.role = "vse" && sale_id.created_by = @request.auth.id && sale_id.posted_to_summary = false)`,
+        deleteRule: `${ADMIN_RULE} || (@request.auth.role = "vse" && sale_id.created_by = @request.auth.id && sale_id.posted_to_summary = false)`,
+    }, flags.force);
+
     // Stock adjustment approval workflow (request header + line items).
     // Requests are created as pending and only mutate warehouse_stock /
     // inventory_logs when an admin approves them.
@@ -790,13 +838,18 @@ async function main() {
         console.error('Error: users auth collection not found.');
         process.exit(1);
     }
-    const ROLE_VALUES = ['admin', 'empties_manager', 'operations_manager', 'warehouse_manager', 'sales_manager', 'cashier', 'auditor'];
+    const ROLE_VALUES = ['admin', 'empties_manager', 'operations_manager', 'warehouse_manager', 'sales_manager', 'cashier', 'auditor', 'account_manager', 'vse'];
     const hasRole = usersCol.fields.some((f) => f.name === 'role');
     const fields = hasRole
-        ? usersCol.fields.map((f) => (f.name === 'role' && f.type === 'select' && !(f.values || []).includes('warehouse_manager')
-            ? { ...f, values: [...(f.values || []), 'warehouse_manager'] }
+        ? usersCol.fields.map((f) => (f.name === 'role' && f.type === 'select'
+            ? { ...f, values: [...new Set([...(f.values || []), ...ROLE_VALUES])] }
             : f))
         : [...usersCol.fields, fld('select', 'role', { values: ROLE_VALUES, maxSelect: 1 })];
+    // Link a login to its VSE customer (used only by role 'vse')
+    if (!fields.some((f) => f.name === 'vse_customer_id')) {
+        const { customers: customersCol } = await getCollectionsMap();
+        fields.push(fld('relation', 'vse_customer_id', { collectionId: customersCol.id, maxSelect: 1 }));
+    }
     if (!flags.dryRun) {
         await pb.collections.update(usersCol.id, {
             fields,

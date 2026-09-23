@@ -135,6 +135,8 @@ export default function ManageUsers() {
             case 'operations_manager': return 'bg-blue-100 text-blue-800 border-blue-200';
             case 'warehouse_manager': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
             case 'sales_manager': return 'bg-green-100 text-green-800 border-green-200';
+            case 'account_manager': return 'bg-teal-100 text-teal-800 border-teal-200';
+            case 'vse': return 'bg-orange-100 text-orange-800 border-orange-200';
             case 'empties_manager': return 'bg-amber-100 text-amber-800 border-amber-200';
             case 'cashier': return 'bg-purple-100 text-purple-800 border-purple-200';
             default: return 'bg-slate-100 text-slate-800 border-slate-200';
@@ -298,6 +300,8 @@ export default function ManageUsers() {
                                     <SelectItem value="operations_manager">Operations Manager</SelectItem>
                                     <SelectItem value="warehouse_manager">Warehouse Manager</SelectItem>
                                     <SelectItem value="sales_manager">Sales Manager</SelectItem>
+                                    <SelectItem value="account_manager">Account Manager</SelectItem>
+                                    <SelectItem value="vse">VSE (field sales)</SelectItem>
                                     <SelectItem value="cashier">Cashier</SelectItem>
                                     <SelectItem value="auditor">Auditor</SelectItem>
                                 </SelectContent>

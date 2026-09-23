@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom"
 import Login from "@/pages/Login"
 import DashboardLayout from "@/layouts/DashboardLayout"
-import DashboardOverview from "@/pages/DashboardOverview"
 import PlaceholderPage from "@/components/PlaceholderPage"
 import AddCustomer from "@/pages/customers/AddCustomer"
 import CustomerList from "@/pages/customers/CustomerList"
@@ -46,6 +45,11 @@ import EmptiesCountReports from "@/pages/operations/EmptiesCountReports"
 import SalesReport from "@/pages/reports/SalesReport"
 import OperationsOverview from "@/pages/operations/OperationsOverview"
 import Setup from "@/pages/operations/Setup"
+import RoleLanding from "@/components/RoleLanding"
+import RecordFieldSale from "@/pages/vse/RecordFieldSale"
+import MyFieldSales from "@/pages/vse/MyFieldSales"
+import VSESalesApprovals from "@/pages/approvals/VSESalesApprovals"
+import VSEEmptiesApprovals from "@/pages/approvals/VSEEmptiesApprovals"
 import ProtectedRoute from "@/components/ProtectedRoute"
 
 function App() {
@@ -63,7 +67,7 @@ function App() {
                 <DashboardLayout />
               </ProtectedRoute>
             }>
-              <Route index element={<DashboardOverview />} />
+              <Route index element={<RoleLanding />} />
 
               {/* Customers */}
               <Route path="customers">
@@ -182,6 +186,11 @@ function App() {
                     <EmptiesCountReports />
                   </ProtectedRoute>
                 } />
+                <Route path="vse-empties-approvals" element={
+                  <ProtectedRoute allowedRoles={['admin', 'empties_manager']}>
+                    <VSEEmptiesApprovals />
+                  </ProtectedRoute>
+                } />
                 <Route path="stocks-coming-in-log" element={
                   <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
                     <StocksComingInLog />
@@ -208,7 +217,7 @@ function App() {
                   </ProtectedRoute>
                 } />
                 <Route path="orders" element={
-                  <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'cashier', 'auditor']}>
+                  <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'cashier', 'auditor', 'account_manager']}>
                     <Orders />
                   </ProtectedRoute>
                 } />
@@ -221,6 +230,29 @@ function App() {
                 <Route path="record-vse-sales" element={
                   <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
                     <RecordVSESale />
+                  </ProtectedRoute>
+                } />
+              </Route>
+
+              {/* VSE field sales (mobile-first, vse role only) */}
+              <Route path="field-sales">
+                <Route path="record" element={
+                  <ProtectedRoute allowedRoles={['vse', 'admin']}>
+                    <RecordFieldSale />
+                  </ProtectedRoute>
+                } />
+                <Route path="mine" element={
+                  <ProtectedRoute allowedRoles={['vse', 'admin']}>
+                    <MyFieldSales />
+                  </ProtectedRoute>
+                } />
+              </Route>
+
+              {/* Field-sale approvals */}
+              <Route path="approvals">
+                <Route path="vse-sales" element={
+                  <ProtectedRoute allowedRoles={['account_manager', 'admin']}>
+                    <VSESalesApprovals />
                   </ProtectedRoute>
                 } />
               </Route>

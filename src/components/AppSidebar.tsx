@@ -9,7 +9,9 @@ import {
     Menu,
     LogOut,
     User,
-    Truck
+    Truck,
+    Package,
+    ClipboardCheck
 } from "lucide-react"
 import { useNavigate, NavLink, useLocation } from "react-router-dom"
 import { useEffect, useState } from "react"
@@ -115,7 +117,7 @@ export function AppSidebar({ className }: SidebarProps) {
             title: "Operations",
             icon: Truck,
             href: "/dashboard/operations",
-            roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "sales_manager"],
+            roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "sales_manager", "empties_manager"],
             children: [
                 { title: "Overview", href: "/dashboard/operations", roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "sales_manager"] },
                 { title: "Stocks Coming In", href: "/dashboard/operations/stocks-coming-in", roles: ["admin", "operations_manager", "auditor"] },
@@ -128,6 +130,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Adjustments Log", href: "/dashboard/operations/adjustments-log", roles: ["admin", "operations_manager", "auditor", "sales_manager"] },
                 { title: "Take Empties Count", href: "/dashboard/operations/empties-count", roles: ["admin", "operations_manager", "warehouse_manager", "empties_manager"] },
                 { title: "Empties Count Reports", href: "/dashboard/operations/empties-count-reports", roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "empties_manager"] },
+                { title: "VSE Empties Approvals", href: "/dashboard/operations/vse-empties-approvals", roles: ["admin", "empties_manager"] },
                 { title: "Setup", href: "/dashboard/operations/setup", roles: ["admin", "operations_manager"] },
             ],
         },
@@ -135,10 +138,10 @@ export function AppSidebar({ className }: SidebarProps) {
             title: "POS",
             icon: ShoppingCart,
             href: "/dashboard/pos",
-            roles: ["admin", "sales_manager", "cashier", "auditor"],
+            roles: ["admin", "sales_manager", "cashier", "auditor", "account_manager"],
             children: [
                 { title: "Sale", href: "/dashboard/pos/sale", roles: ["admin", "sales_manager"] },
-                { title: "Orders", href: "/dashboard/pos/orders", roles: ["admin", "sales_manager", "cashier", "auditor"] },
+                { title: "Orders", href: "/dashboard/pos/orders", roles: ["admin", "sales_manager", "cashier", "auditor", "account_manager"] },
                 { title: "Add Customer", href: "/dashboard/customers/add", roles: ["admin", "sales_manager", "cashier", "auditor"] },
                 { title: "Manage Products", href: "/dashboard/pos/manage-products", roles: ["admin", "sales_manager"] },
                 { title: "Record VSE Sales", href: "/dashboard/pos/record-vse-sales", roles: ["admin", "sales_manager"] },
@@ -148,9 +151,28 @@ export function AppSidebar({ className }: SidebarProps) {
             title: "Reports",
             icon: FileBarChart,
             href: "/dashboard/reports",
-            roles: ["admin", "sales_manager", "cashier", "auditor"],
+            roles: ["admin", "sales_manager", "cashier", "auditor", "account_manager"],
             children: [
-                { title: "Sales Report", href: "/dashboard/reports/sales", roles: ["admin", "sales_manager", "cashier", "auditor"] },
+                { title: "Sales Report", href: "/dashboard/reports/sales", roles: ["admin", "sales_manager", "cashier", "auditor", "account_manager"] },
+            ],
+        },
+        {
+            title: "Field Sales",
+            icon: Package,
+            href: "/dashboard/field-sales",
+            roles: ["vse", "admin"],
+            children: [
+                { title: "Record Field Sale", href: "/dashboard/field-sales/record", roles: ["vse", "admin"] },
+                { title: "My Sales", href: "/dashboard/field-sales/mine", roles: ["vse", "admin"] },
+            ],
+        },
+        {
+            title: "Approvals",
+            icon: ClipboardCheck,
+            href: "/dashboard/approvals",
+            roles: ["account_manager", "admin"],
+            children: [
+                { title: "VSE Sales Approvals", href: "/dashboard/approvals/vse-sales", roles: ["account_manager", "admin"] },
             ],
         },
         {

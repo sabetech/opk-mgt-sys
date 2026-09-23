@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -20,6 +20,31 @@ export default function AddUser() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [role, setRole] = useState<UserRole>('auditor');
+    const [vseCustomerId, setVseCustomerId] = useState('');
+    const [vseCustomers, setVseCustomers] = useState<{ id: string, name: string }[]>([]);
+
+    // Load VSE customers for the link picker
+    useEffect(() => {
+        if (role !== 'vse') return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const typeData = await pb.collection('customer_types').getFirstListItem('name = "Retailer (VSE)"', { fields: 'id' });
+                const data = await pb.collection('customers').getFullList({
+                    filter: `type_id = "${typeData.id}" && deleted_at = ""`,
+                    sort: 'name',
+                    fields: 'id, name',
+                });
+                if (!cancelled) setVseCustomers(data.map((v) => ({ id: v.id, name: v.name })));
+            } catch (error) {
+                console.error('Error fetching VSEs:', error);
+                toast.error('Failed to load VSE list');
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [role]);
 
     // Only allow admins
     if (profile?.role !== 'admin') {
@@ -38,6 +63,11 @@ export default function AddUser() {
             return;
         }
 
+        if (role === 'vse' && !vseCustomerId) {
+            toast.error('Select the VSE customer this login belongs to.');
+            return;
+        }
+
         setLoading(true);
 
         try {
@@ -46,7 +76,8 @@ export default function AddUser() {
                 password,
                 passwordConfirm: password,
                 name,
-                role
+                role,
+                ...(role === 'vse' ? { vse_customer_id: vseCustomerId } : {}),
             });
 
             console.log('[AddUser] User created successfully');
@@ -58,6 +89,7 @@ export default function AddUser() {
             setEmail('');
             setPassword('');
             setRole('auditor');
+            setVseCustomerId('');
         } catch (error: any) {
             console.error('Error creating user:', error?.response?.data || error);
             toast.error(error.response?.data?.message || error.message || 'Failed to create user');
@@ -129,6 +161,8 @@ export default function AddUser() {
                                     <SelectItem value="operations_manager">Operations Manager</SelectItem>
                                     <SelectItem value="warehouse_manager">Warehouse Manager</SelectItem>
                                     <SelectItem value="sales_manager">Sales Manager</SelectItem>
+                                    <SelectItem value="account_manager">Account Manager</SelectItem>
+                                    <SelectItem value="vse">VSE (field sales)</SelectItem>
                                     <SelectItem value="cashier">Cashier</SelectItem>
                                     <SelectItem value="auditor">Auditor</SelectItem>
                                 </SelectContent>
@@ -137,6 +171,26 @@ export default function AddUser() {
                                 Roles determine which sections of the application the user can access.
                             </p>
                         </div>
+                        {role === 'vse' && (
+                            <div className="space-y-2">
+                                <Label htmlFor="vse_customer">VSE Customer</Label>
+                                <Select value={vseCustomerId} onValueChange={setVseCustomerId}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select the VSE customer" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {vseCustomers.map((vse) => (
+                                            <SelectItem key={vse.id} value={vse.id}>
+                                                {vse.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                <p className="text-[0.8rem] text-muted-foreground mt-2">
+                                    This login will record field sales for this VSE only.
+                                </p>
+                            </div>
+                        )}
                     </CardContent>
                     <CardFooter className="flex justify-between">
                         <Button variant="outline" type="button" onClick={() => navigate(-1)}>

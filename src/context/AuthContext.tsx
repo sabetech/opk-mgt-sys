@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { RecordModel } from 'pocketbase';
 import { pb } from '@/lib/pocketbase';
 
-export type UserRole = 'admin' | 'empties_manager' | 'operations_manager' | 'sales_manager' | 'cashier' | 'auditor' | 'warehouse_manager';
+export type UserRole = 'admin' | 'empties_manager' | 'operations_manager' | 'sales_manager' | 'cashier' | 'auditor' | 'warehouse_manager' | 'account_manager' | 'vse';
 
 export interface Profile {
     id: string;
