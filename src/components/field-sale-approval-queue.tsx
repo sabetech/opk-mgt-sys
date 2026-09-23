@@ -53,6 +53,15 @@ interface ApprovalQueueProps {
     description: string
 }
 
+/** PocketBase returns dates with a space separator — slice to YYYY-MM-DD
+ *  before parsing so format() never throws RangeError. */
+function formatRowDate(value: string): string {
+    if (!value) return ""
+    const day = String(value).slice(0, 10)
+    const parsed = new Date(`${day}T12:00:00`)
+    return isNaN(parsed.getTime()) ? day : format(parsed, "MMM d, yyyy")
+}
+
 export default function FieldSaleApprovalQueue({ dimension, title, description }: ApprovalQueueProps) {
     const { profile } = useAuth()
     const [filter, setFilter] = useState<"pending" | "approved" | "rejected" | "all">("pending")
@@ -256,7 +265,7 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                             <TableCell>
                                                 <div className="font-mono text-sm font-bold">{row.reference}</div>
                                                 <div className="text-xs text-muted-foreground">
-                                                    {row.date ? format(new Date(`${row.date}T12:00:00`), "MMM d, yyyy") : ""}
+                                                    {formatRowDate(row.date)}
                                                     {row.posted_to_summary ? " · Counted" : ""}
                                                 </div>
                                             </TableCell>

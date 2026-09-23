@@ -54,9 +54,11 @@ export default function FieldSaleForm({
     onCancelEdit,
 }: FieldSaleFormProps) {
     const isEdit = !!saleId
-    const [date, setDate] = useState<Date | undefined>(
-        initialDate ? new Date(`${initialDate}T12:00:00`) : new Date()
-    )
+    const [date, setDate] = useState<Date | undefined>(() => {
+        if (!initialDate) return new Date()
+        const parsed = new Date(`${String(initialDate).slice(0, 10)}T12:00:00`)
+        return isNaN(parsed.getTime()) ? new Date() : parsed
+    })
     const [calendarOpen, setCalendarOpen] = useState(false)
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>(
         (initialItems || []).map((i) => ({ ...i }))
