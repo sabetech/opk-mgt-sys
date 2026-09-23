@@ -1,4 +1,4 @@
-import { pb } from "@/lib/pocketbase"
+import { pb, dayFilter } from "@/lib/pocketbase"
 
 export type FieldSaleStatus = "pending" | "approved" | "rejected"
 export type FieldSaleDimension = "sale" | "empties"
@@ -23,9 +23,110 @@ export interface FieldSaleRecord {
 
 export const generateFieldSaleReference = () => {
     const now = new Date()
-    const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '')
+    const dateStr = now.toISOString().split('T')[0].replace(/-/g, '')
     const randomSuffix = Math.random().toString(36).substring(2, 6).toUpperCase()
     return `VF-${dateStr}-${randomSuffix}`
+}
+
+export interface VseCarLine {
+    productId: string
+    name: string
+    code: string
+    returnable: boolean
+    given: number
+    sold: number
+    returned: number
+    pending: number
+    remaining: number
+}
+
+/**
+ * "In the car" stock for a VSE on one date: approved loadouts minus
+ * validated sold/returned movements minus the VSE's own still-pending
+ * field-sale lines (optionally excluding one sale being edited).
+ * Only products with given > 0 are returned.
+ */
+export async function fetchVseCarStock(
+    vseCustomerId: string,
+    date: Date | string,
+    userId: string,
+    excludeSaleId?: string
+): Promise<Record<string, VseCarLine>> {
+    const result: Record<string, VseCarLine> = {}
+    if (!vseCustomerId || !date) return result
+
+    const day = dayFilter("date", date)
+
+    // 1. Approved loadouts for this VSE + date -> given per product
+    const loadouts = await pb.collection("loadouts").getFullList({
+        filter: `${day} && vse_id = "${vseCustomerId}" && status = "approved"`,
+        fields: "id",
+    })
+    const loadoutIds = loadouts.map((l) => l.id)
+    if (loadoutIds.length > 0) {
+        const items = await pb.collection("loadout_items").getFullList({
+            filter: loadoutIds.map((id) => `loadout_id = "${id}"`).join(" || "),
+            expand: "product_id",
+        })
+        for (const item of items) {
+            const rel = item.expand?.product_id
+            if (!item.product_id) continue
+            const line = result[item.product_id] || {
+                productId: item.product_id,
+                name: rel?.sku_name || "Unknown",
+                code: rel?.product_code || rel?.code_name || "",
+                returnable: rel?.returnable === true,
+                given: 0,
+                sold: 0,
+                returned: 0,
+                pending: 0,
+                remaining: 0,
+            }
+            line.given += item.quantity || 0
+            result[item.product_id] = line
+        }
+    }
+    if (Object.keys(result).length === 0) return result
+
+    // 2. Validated movements (sold + unsold returns) for this VSE + date
+    const movements = await pb.collection("vse_movements").getFullList({
+        filter: `${day} && vse_id = "${vseCustomerId}"`,
+        fields: "product_id, quantity, movement_type",
+    })
+    for (const m of movements) {
+        const line = result[m.product_id]
+        if (!line) continue
+        if (m.movement_type === "sold") line.sold += m.quantity || 0
+        else if (m.movement_type === "returned") line.returned += m.quantity || 0
+    }
+
+    // 3. Own still-pending field sales for this date (already validated ones
+    // are posted into vse_movements above — exclude them to avoid double count)
+    if (userId) {
+        const pendingHeaders = await pb.collection("vse_field_sales").getFullList({
+            filter: `created_by = "${userId}" && ${day} && posted_to_summary = false`,
+            fields: "id",
+        })
+        const pendingIds = pendingHeaders
+            .map((h) => h.id)
+            .filter((id) => id !== excludeSaleId)
+        if (pendingIds.length > 0) {
+            const pendingItems = await pb.collection("vse_field_sale_items").getFullList({
+                filter: pendingIds.map((id) => `sale_id = "${id}"`).join(" || "),
+                fields: "sale_id, product_id, quantity",
+            })
+            for (const item of pendingItems) {
+                const line = result[item.product_id]
+                if (!line) continue
+                line.pending += item.quantity || 0
+            }
+        }
+    }
+
+    for (const line of Object.values(result)) {
+        line.remaining = line.given - line.sold - line.returned - line.pending
+    }
+    return result
 }
 
 interface CreateFieldSaleInput {

@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
-import { createFieldSale, updateFieldSale } from "@/lib/fieldSales"
+import { createFieldSale, updateFieldSale, fetchVseCarStock, type VseCarLine } from "@/lib/fieldSales"
 
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -61,15 +61,19 @@ export default function FieldSaleForm({
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>(
         (initialItems || []).map((i) => ({ ...i }))
     )
-    // productId -> { retail, returnable }
+    // productId -> { retail, returnable } (pricing + empties prefill; the
+    // picker list itself comes from the car computation below)
     const [catalog, setCatalog] = useState<Record<string, { retail: number; returnable: boolean }>>({})
-    const [products, setProducts] = useState<Product[]>([])
     const [empties, setEmpties] = useState<string>(
         initialEmpties !== undefined ? String(initialEmpties) : ""
     )
     const [emptiesTouched, setEmptiesTouched] = useState(isEdit)
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
+    // "In the car" stock for this VSE + date (drives the summary panel,
+    // the given-only picker, and the oversell guard)
+    const [car, setCar] = useState<Record<string, VseCarLine>>({})
+    const [carLoading, setCarLoading] = useState(false)
 
     useEffect(() => {
         const load = async () => {
@@ -80,19 +84,13 @@ export default function FieldSaleForm({
                     sort: 'sku_name',
                 })
                 const cat: Record<string, { retail: number; returnable: boolean }> = {}
-                const list: Product[] = data.map((item) => {
+                for (const item of data) {
                     cat[item.id] = {
                         retail: item.retail_price ?? 0,
                         returnable: item.returnable === true,
                     }
-                    return {
-                        id: item.id,
-                        name: item.sku_name,
-                        code: item.product_code || item.code_name || '',
-                    }
-                })
+                }
                 setCatalog(cat)
-                setProducts(list)
             } catch (error) {
                 console.error('Error fetching products:', error)
                 toast.error('Failed to load products')
@@ -107,6 +105,47 @@ export default function FieldSaleForm({
         (sum, item) => sum + (catalog[item.productId]?.returnable ? item.quantity : 0),
         0
     )
+
+    // Car stock follows the VSE + selected date (excludes the sale being edited)
+    useEffect(() => {
+        if (!vseCustomerId || !date) {
+            setCar({})
+            return
+        }
+        let cancelled = false
+        setCarLoading(true)
+        const userId = pb.authStore.model?.id || ''
+        fetchVseCarStock(vseCustomerId, date, userId, saleId)
+            .then((stock) => {
+                if (!cancelled) setCar(stock)
+            })
+            .catch((error) => {
+                if (!cancelled) {
+                    console.error('Error fetching car stock:', error)
+                    setCar({})
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setCarLoading(false)
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [vseCustomerId, date, saleId])
+
+    // Picker shows given-only products with availability hints
+    const carProducts: Product[] = Object.values(car).map((line) => ({
+        id: line.productId,
+        name: line.name,
+        code: line.code,
+    }))
+
+    const carItemState = (product: Product) => {
+        const remaining = car[product.id]?.remaining ?? 0
+        return remaining <= 0
+            ? { disabled: true, hint: 'Sold out' }
+            : { disabled: false, hint: `${remaining} left` }
+    }
 
     // Autofill empties from returnables until the VSE overrides it
     useEffect(() => {
@@ -144,6 +183,15 @@ export default function FieldSaleForm({
         const emptiesNum = parseInt(empties, 10)
         if (isNaN(emptiesNum) || emptiesNum < 0) {
             toast.error('Enter a valid number of empties received (0 or more)')
+            return
+        }
+        // Oversell guard: no line may exceed what's left in the car
+        const overSold = selectedItems.find(
+            (item) => item.quantity > (car[item.productId]?.remaining ?? 0)
+        )
+        if (overSold) {
+            const remaining = car[overSold.productId]?.remaining ?? 0
+            toast.error(`Only ${remaining} × ${overSold.productName} left in the car`)
             return
         }
 
@@ -218,17 +266,62 @@ export default function FieldSaleForm({
 
             <Card>
                 <CardHeader className="pb-3">
+                    <CardTitle className="text-base">
+                        In Your Car{date ? ` — ${format(date, "MMM d")}` : ""}
+                    </CardTitle>
+                    <CardDescription>
+                        What this loadout still holds. Only these products can be sold.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    {carLoading ? (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Checking car stock...
+                        </div>
+                    ) : carProducts.length === 0 ? (
+                        <p className="text-sm text-muted-foreground py-2">
+                            No loadout for this VSE on this date — nothing available to sell.
+                        </p>
+                    ) : (
+                        <div className="rounded-md border divide-y">
+                            {carProducts.map((p) => {
+                                const remaining = car[p.id]?.remaining ?? 0
+                                const depleted = remaining <= 0
+                                return (
+                                    <div key={p.id} className="flex items-center justify-between px-3 py-2 text-sm">
+                                        <span className={cn("font-medium", depleted && "text-muted-foreground line-through")}>
+                                            {p.name}
+                                        </span>
+                                        {depleted ? (
+                                            <Badge variant="outline" className="text-[11px] text-red-600 border-red-200 bg-red-50">
+                                                Sold out
+                                            </Badge>
+                                        ) : (
+                                            <span className="font-bold font-mono">{remaining} left</span>
+                                        )}
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader className="pb-3">
                     <CardTitle className="text-base">Products Sold</CardTitle>
                     <CardDescription>Retail prices apply.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                     {!loading && (
                         <ProductSelector
-                            products={products}
+                            products={carProducts}
                             selectedItems={selectedItems}
                             onItemsChange={setSelectedItems}
                             quantityLabel="Quantity"
-                            disabled={saving}
+                            disabled={saving || carLoading}
+                            itemState={carItemState}
                         />
                     )}
 
@@ -261,6 +354,7 @@ export default function FieldSaleForm({
                                                     <Input
                                                         type="number"
                                                         min={0}
+                                                        max={Math.max(0, car[item.productId]?.remaining ?? 0)}
                                                         value={item.quantity}
                                                         onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
                                                         disabled={saving}

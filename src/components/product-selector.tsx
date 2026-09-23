@@ -42,6 +42,11 @@ interface ProductSelectorProps {
     quantityLabel?: string
     disabled?: boolean
     filterCondition?: (product: Product) => boolean
+    /**
+     * Optional per-product state (e.g. stock availability). Disabled items
+     * render grayed out with the hint and cannot be selected.
+     */
+    itemState?: (product: Product) => { disabled?: boolean; hint?: string }
 }
 
 export function ProductSelector({
@@ -50,7 +55,8 @@ export function ProductSelector({
     onItemsChange,
     quantityLabel = "Quantity",
     disabled = false,
-    filterCondition
+    filterCondition,
+    itemState
 }: ProductSelectorProps) {
     const [openProduct, setOpenProduct] = useState(false)
     const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
@@ -70,6 +76,8 @@ export function ProductSelector({
 
         const product = products.find(p => p.id === selectedProduct)
         if (!product) return
+        // Backstop: never add an item the picker marks as disabled
+        if (itemState?.(product)?.disabled) return
 
         const newItem: SelectedItem = {
             id: crypto.randomUUID(),
@@ -137,24 +145,35 @@ export function ProductSelector({
                                         })()}
                                     </CommandEmpty>
                                     <CommandGroup>
-                                        {availableProducts.map((product) => (
-                                            <CommandItem
-                                                key={product.id}
-                                                value={product.name}
-                                                onSelect={() => {
-                                                    setSelectedProduct(product.id === selectedProduct ? null : product.id)
-                                                    setOpenProduct(false)
-                                                }}
-                                            >
-                                                <Check
-                                                    className={cn(
-                                                        "mr-2 h-4 w-4",
-                                                        selectedProduct === product.id ? "opacity-100" : "opacity-0"
+                                        {availableProducts.map((product) => {
+                                            const state = itemState?.(product)
+                                            return (
+                                                <CommandItem
+                                                    key={product.id}
+                                                    value={product.name}
+                                                    disabled={state?.disabled}
+                                                    onSelect={() => {
+                                                        if (state?.disabled) return
+                                                        setSelectedProduct(product.id === selectedProduct ? null : product.id)
+                                                        setOpenProduct(false)
+                                                    }}
+                                                    className={cn(state?.disabled && "opacity-50")}
+                                                >
+                                                    <Check
+                                                        className={cn(
+                                                            "mr-2 h-4 w-4",
+                                                            selectedProduct === product.id ? "opacity-100" : "opacity-0"
+                                                        )}
+                                                    />
+                                                    <span className="flex-1">{product.name}</span>
+                                                    {state?.hint && (
+                                                        <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                                            {state.hint}
+                                                        </span>
                                                     )}
-                                                />
-                                                {product.name}
-                                            </CommandItem>
-                                        ))}
+                                                </CommandItem>
+                                            )
+                                        })}
                                     </CommandGroup>
                                 </CommandList>
                             </Command>
