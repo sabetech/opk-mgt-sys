@@ -70,8 +70,9 @@ export default function MyFieldSales() {
         try {
             const headers = await pb.collection('vse_field_sales').getFullList({
                 filter: `created_by = "${userId}" && ${dayFilter("date", target)}`,
-                sort: '-created',
             })
+            // NOTE: sorting by `created` server-side fails on some hosts — sort locally.
+            headers.sort((a, b) => String(b.created).localeCompare(String(a.created)))
             const ids = headers.map((h) => h.id)
             const items = ids.length > 0
                 ? await pb.collection('vse_field_sale_items').getFullList({
