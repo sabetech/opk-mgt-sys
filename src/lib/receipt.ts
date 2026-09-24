@@ -214,24 +214,54 @@ export interface StockLevelRow {
     productName: string
     quantity: number
     retailPrice: number | null
+    /** Product category (products.code_name); blank becomes "Uncategorized". */
+    category: string
 }
 
 /**
- * Builds a standalone A4 HTML document listing current stock levels.
- * Columns: SKU Code | Product Name | Stock Level | Retail Price.
+ * Builds a standalone A4 HTML document listing current stock levels,
+ * grouped by category. Each category gets a full-width header row with
+ * item + unit subtotals, and row numbering restarts at 1 per category.
+ * Columns: # | SKU Code | Product Name | Stock Level | Retail Price.
  */
 export function buildStockLevelsHtml(rows: StockLevelRow[], generatedAt: Date = new Date()): string {
-    const sorted = [...rows].sort((a, b) => a.productName.localeCompare(b.productName))
-    const bodyRows = sorted
-        .map(
-            (row, index) => `<tr>
+    const UNCATEGORIZED = "Uncategorized"
+    const groupOf = (row: StockLevelRow) => row.category?.trim() || UNCATEGORIZED
+
+    // Group by category; categories A-Z (uncategorized last), products by name.
+    const groups = new Map<string, StockLevelRow[]>()
+    for (const row of rows) {
+        const key = groupOf(row)
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(row)
+    }
+    const ordered = [...groups.entries()].sort(([a], [b]) => {
+        if (a === UNCATEGORIZED) return 1
+        if (b === UNCATEGORIZED) return -1
+        return a.localeCompare(b)
+    })
+    for (const [, items] of ordered) {
+        items.sort((a, b) => a.productName.localeCompare(b.productName))
+    }
+
+    const totalUnits = rows.reduce((sum, r) => sum + (r.quantity || 0), 0)
+    const bodyRows = ordered
+        .map(([category, items]) => {
+            const units = items.reduce((sum, r) => sum + (r.quantity || 0), 0)
+            const header = `<tr class="cat"><td colspan="5">${escapeHtml(category)} — ${items.length} item${items.length === 1 ? "" : "s"}, ${units} unit${units === 1 ? "" : "s"}</td></tr>`
+            const lines = items
+                .map(
+                    (row, index) => `<tr>
                 <td class="center">${index + 1}</td>
                 <td>${escapeHtml(row.skuCode)}</td>
                 <td>${escapeHtml(row.productName)}</td>
                 <td class="right">${row.quantity}</td>
                 <td class="right">GHc ${formatMoney(row.retailPrice ?? 0)}</td>
             </tr>`
-        )
+                )
+                .join("")
+            return header + lines
+        })
         .join("")
 
     return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Current Stock Levels</title>
@@ -247,6 +277,8 @@ th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
 th { background: #f0f0f0; font-weight: bold; }
 thead { display: table-header-group; }
 tr { page-break-inside: avoid; }
+tr.cat { page-break-after: avoid; }
+.cat td { background: #e2e2e2; font-weight: bold; font-size: 13px; }
 .right { text-align: right; }
 .center { text-align: center; }
 .total { margin-top: 10px; font-weight: bold; }
@@ -254,7 +286,7 @@ tr { page-break-inside: avoid; }
 </style></head><body>
 <div class="company">OPPONG KYEKYEKU DISTRIBUTION LTD</div>
 <h2>Current Stock Levels</h2>
-<div class="subtitle">Generated: ${formatDateTime(generatedAt)} | Items: ${sorted.length}</div>
+<div class="subtitle">Generated: ${formatDateTime(generatedAt)} | Categories: ${ordered.length} | Items: ${rows.length} | Total units: ${totalUnits}</div>
 <table><thead><tr>
 <th class="center">#</th><th>SKU Code</th><th>Product Name</th><th class="right">Stock Level</th><th class="right">Retail Price</th>
 </tr></thead><tbody>${bodyRows || `<tr><td colspan="5" class="center">No products found.</td></tr>`}</tbody></table>

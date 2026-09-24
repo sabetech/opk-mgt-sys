@@ -178,6 +178,7 @@ export default function ManageProducts() {
             productName: product.sku_name,
             quantity: product.quantity,
             retailPrice: product.retail_price,
+            category: product.code_name?.trim() || "Uncategorized",
         }))
         printReceiptHtml(buildStockLevelsHtml(rows), "Current Stock Levels")
     }

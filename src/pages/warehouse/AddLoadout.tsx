@@ -122,6 +122,7 @@ export default function AddLoadout() {
                 vse_id: selectedVse,
                 status: 'pending'
             })
+            if (!loadout) throw new Error('Failed to create loadout header')
 
             // 2. Create Loadout Items
             for (const item of selectedItems) {
