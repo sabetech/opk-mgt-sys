@@ -27,6 +27,8 @@ import {
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb, dayFilter } from "@/lib/pocketbase"
+import { generateOrderNumber } from "@/lib/orderNumber"
+import { useAuth } from "@/context/AuthContext"
 
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -55,9 +57,17 @@ export default function VSEMovementForm({
     const [vseOpen, setVseOpen] = useState(false)
     const [selectedVse, setSelectedVse] = useState<string>("")
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([])
+    const { profile } = useAuth()
+    const isVseSale = movementType === "sold"
 
     // DB State
     const [products, setProducts] = useState<Product[]>([])
+    const [priceByProduct, setPriceByProduct] = useState<Record<string, number>>({})
+    // Products given to the selected VSE on the selected date (approved
+    // loadouts) + remaining qty per product (given minus already
+    // sold/returned that day). Drives the restricted dropdown.
+    const [allowedProductIds, setAllowedProductIds] = useState<string[]>([])
+    const [remainingByProduct, setRemainingByProduct] = useState<Record<string, number>>({})
     const [vseList, setVseList] = useState<{ id: string, name: string }[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -97,7 +107,8 @@ export default function VSEMovementForm({
         try {
             const data = await pb.collection('products').getFullList({
                 filter: 'deleted_at = ""',
-                sort: 'sku_name'
+                sort: 'sku_name',
+                fields: 'id, sku_name, product_code, code_name, retail_price',
             })
 
             const transformedProducts: Product[] = data.map((item) => ({
@@ -105,8 +116,13 @@ export default function VSEMovementForm({
                 name: item.sku_name,
                 code: item.product_code || item.code_name || ''
             }))
+            const prices: Record<string, number> = {}
+            for (const item of data) {
+                prices[item.id] = item.retail_price ?? 0
+            }
 
             setProducts(transformedProducts)
+            setPriceByProduct(prices)
         } catch (error) {
             console.error('Error fetching products:', error)
             toast.error('Failed to load products')
@@ -115,9 +131,14 @@ export default function VSEMovementForm({
 
     // Prepopulate from the VSE's approved loadout for the selected date,
     // minus quantities already recorded as sold/returned that day.
-    // Replaces the item list whenever VSE or date changes.
+    // Replaces the item list whenever VSE or date changes. Also restricts
+    // the product dropdown to products given to this VSE on this date.
     useEffect(() => {
-        if (!selectedVse || !date) return
+        if (!selectedVse || !date) {
+            setAllowedProductIds([])
+            setRemainingByProduct({})
+            return
+        }
         let cancelled = false
 
         const prefill = async () => {
@@ -164,6 +185,17 @@ export default function VSEMovementForm({
                 }
 
                 if (cancelled) return
+
+                // Dropdown scope: every product given to this VSE on this
+                // date (even if fully accounted — it stays visible with a
+                // "Sold out" hint via itemState below).
+                const allowed = Object.keys(givenByProduct).filter((pid) => (givenByProduct[pid] || 0) > 0)
+                const remaining: Record<string, number> = {}
+                for (const pid of allowed) {
+                    remaining[pid] = givenByProduct[pid] - (accountedByProduct[pid] || 0)
+                }
+                setAllowedProductIds(allowed)
+                setRemainingByProduct(remaining)
 
                 // 3. Remainder per product; drop fully-accounted lines
                 const prefilled: SelectedItem[] = Object.entries(givenByProduct)
@@ -231,6 +263,81 @@ export default function VSEMovementForm({
         try {
             const dateStr = date.toISOString().split('T')[0]
 
+            // VSE sales go to the orders table for approval (order type
+            // "vse"). vse_movements are written on approval only, so the
+            // Loadout Summary is not double-counted. Stock already left the
+            // warehouse via the loadout, so approval skips warehouse
+            // fulfillment entirely.
+            if (isVseSale) {
+                const overSold = selectedItems.find(
+                    (item) => item.quantity > (remainingByProduct[item.productId] ?? 0)
+                )
+                if (overSold) {
+                    const remaining = remainingByProduct[overSold.productId] ?? 0
+                    toast.error(`Only ${remaining} × ${overSold.productName} left from this loadout`)
+                    setSaving(false)
+                    return
+                }
+
+                const totalAmount = selectedItems.reduce(
+                    (sum, item) => sum + item.quantity * (priceByProduct[item.productId] ?? 0),
+                    0
+                )
+
+                const orderType = await pb.collection('order_types').getFirstListItem('name = "vse"', { fields: 'id' })
+                const orderNumber = await generateOrderNumber()
+                const vseName = vseList.find((v) => v.id === selectedVse)?.name || 'VSE'
+
+                const order = await pb.collection('orders').create({
+                    customer_id: selectedVse,
+                    order_number: orderNumber,
+                    total_amount: totalAmount,
+                    payment_type: 'cash',
+                    order_type_id: orderType.id,
+                    status: 'pending',
+                    date_time: date.toISOString(),
+                    created_by: profile?.id || '',
+                })
+
+                for (const item of selectedItems) {
+                    const unitPrice = priceByProduct[item.productId] ?? 0
+                    await pb.collection('sales').create({
+                        order_id: order.id,
+                        product_id: item.productId,
+                        quantity: item.quantity,
+                        unit_price: unitPrice,
+                        sub_total: item.quantity * unitPrice,
+                        discount: 0,
+                    })
+                }
+
+                toast.success(`Order #${orderNumber} created for ${vseName} and is pending approval.`)
+
+                // Reset form
+                setSelectedVse("")
+                setSelectedItems([])
+                setAllowedProductIds([])
+                setRemainingByProduct({})
+                setDate(undefined)
+                return
+            }
+
+            // VSE returns go straight back into the warehouse: the tally row
+            // keeps the Loadout Summary correct and the units physically
+            // restock warehouse_stock (created if missing) with an
+            // inventory_logs audit entry each.
+            const overReturned = selectedItems.find(
+                (item) => item.quantity > (remainingByProduct[item.productId] ?? 0)
+            )
+            if (overReturned) {
+                const remaining = remainingByProduct[overReturned.productId] ?? 0
+                toast.error(`Only ${remaining} × ${overReturned.productName} outstanding from this loadout`)
+                setSaving(false)
+                return
+            }
+
+            const vseName = vseList.find((v) => v.id === selectedVse)?.name || 'VSE'
+            const restockFailures: string[] = []
             for (const item of selectedItems) {
                 await pb.collection('vse_movements').create({
                     date: dateStr,
@@ -239,21 +346,87 @@ export default function VSEMovementForm({
                     quantity: item.quantity,
                     movement_type: movementType,
                 })
+
+                try {
+                    const stock = await pb.collection('warehouse_stock')
+                        .getFirstListItem(`product_id = "${item.productId}"`, { fields: 'id, quantity' })
+                        .catch((err) => {
+                            if (err?.status === 404) return null
+                            throw err
+                        })
+                    if (stock) {
+                        await pb.collection('warehouse_stock').update(stock.id, {
+                            quantity: (stock.quantity || 0) + item.quantity,
+                        })
+                    } else {
+                        await pb.collection('warehouse_stock').create({
+                            product_id: item.productId,
+                            quantity: item.quantity,
+                        })
+                    }
+                } catch (err) {
+                    console.error(`Failed to restock ${item.productName}:`, err)
+                    restockFailures.push(item.productName)
+                    continue
+                }
+
+                try {
+                    await pb.collection('inventory_logs').create({
+                        date: dateStr,
+                        product_id: item.productId,
+                        type: 'vse_return',
+                        quantity: item.quantity,
+                        reference_table: 'vse_movements',
+                        description: `VSE return - ${vseName}`,
+                    })
+                } catch (err) {
+                    console.error(`Failed to log VSE return of ${item.productName}:`, err)
+                    restockFailures.push(`${item.productName} (audit log)`)
+                }
             }
 
-            toast.success(successMessage)
+            if (restockFailures.length > 0) {
+                toast.warning(`Returns recorded, but warehouse restock needs review: ${restockFailures.join(', ')}`)
+            } else {
+                toast.success(successMessage)
+            }
 
             // Reset form
             setSelectedVse("")
             setSelectedItems([])
+            setAllowedProductIds([])
+            setRemainingByProduct({})
             setDate(undefined)
         } catch (error) {
             console.error('Error recording VSE movement:', error)
-            toast.error('Failed to record VSE movement')
+            toast.error(isVseSale ? 'Failed to create VSE sale order' : 'Failed to record VSE movement')
         } finally {
             setSaving(false)
         }
     }
+
+    // Dropdown scope: only products given to the selected VSE on the
+    // selected date (both sales and returns). Before a VSE + date is
+    // picked there is nothing to scope to, so show the full catalog.
+    const scopeActive = !!selectedVse && !!date
+    const allowedIdSet = new Set(allowedProductIds)
+    const pickerProducts = scopeActive
+        ? products.filter((p) => allowedIdSet.has(p.id))
+        : products
+    const pickerItemState = scopeActive
+        ? (product: Product) => {
+            const remaining = remainingByProduct[product.id] ?? 0
+            return remaining <= 0
+                ? { disabled: true, hint: 'Sold out' }
+                : { disabled: false, hint: `${remaining} left` }
+        }
+        : undefined
+    const saleTotalAmount = isVseSale
+        ? selectedItems.reduce(
+            (sum, item) => sum + item.quantity * (priceByProduct[item.productId] ?? 0),
+            0
+        )
+        : 0
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto">
@@ -361,7 +534,9 @@ export default function VSEMovementForm({
                 <CardHeader>
                     <CardTitle>Product Quantities</CardTitle>
                     <CardDescription>
-                        Enter the quantity of each product.
+                        {isVseSale
+                            ? "Only products given to the selected VSE on the selected date can be sold. Retail prices apply."
+                            : "Only products given to the selected VSE on the selected date can be returned. Returns restock the warehouse."}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -371,12 +546,20 @@ export default function VSEMovementForm({
                             Loading loadout for prepopulation...
                         </div>
                     )}
+                    {!prefilling && selectedVse && date && pickerProducts.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                            {isVseSale
+                                ? "No loadout for this VSE on this date — nothing available to sell."
+                                : "No loadout for this VSE on this date — nothing available to return."}
+                        </p>
+                    )}
                     <ProductSelector
-                        products={products}
+                        products={pickerProducts}
                         selectedItems={selectedItems}
                         onItemsChange={handleItemsChange}
                         quantityLabel={quantityLabel}
-                        disabled={loading || saving || prefilling}
+                        disabled={loading || saving || prefilling || (scopeActive && pickerProducts.length === 0)}
+                        itemState={pickerItemState}
                     />
 
                     {/* Items List */}
@@ -385,15 +568,23 @@ export default function VSEMovementForm({
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Product Name</TableHead>
+                                    {isVseSale && (
+                                        <TableHead className="text-right">Retail Price</TableHead>
+                                    )}
                                     <TableHead className="text-right">
                                         {quantityLabel}
                                     </TableHead>
+                                    {isVseSale && (
+                                        <TableHead className="text-right">Amount</TableHead>
+                                    )}
                                     <TableHead className="w-[100px]"></TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {selectedItems.length > 0 ? (
-                                    selectedItems.map((item: SelectedItem) => (
+                                    selectedItems.map((item: SelectedItem) => {
+                                        const unitPrice = priceByProduct[item.productId] ?? 0
+                                        return (
                                         <TableRow key={item.id}>
                                             <TableCell className="font-medium">
                                                 <div className="flex items-center gap-2">
@@ -406,16 +597,27 @@ export default function VSEMovementForm({
                                                     )}
                                                 </div>
                                             </TableCell>
+                                            {isVseSale && (
+                                                <TableCell className="text-right whitespace-nowrap">
+                                                    GH₵ {unitPrice.toFixed(2)}
+                                                </TableCell>
+                                            )}
                                             <TableCell className="text-right">
                                                 <Input
                                                     type="number"
                                                     min={0}
+                                                    max={scopeActive ? Math.max(0, remainingByProduct[item.productId] ?? 0) : undefined}
                                                     value={item.quantity}
                                                     onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
                                                     disabled={saving || prefilling}
                                                     className="w-20 ml-auto text-right font-bold h-8"
                                                 />
                                             </TableCell>
+                                            {isVseSale && (
+                                                <TableCell className="text-right font-bold whitespace-nowrap">
+                                                    GH₵ {(item.quantity * unitPrice).toFixed(2)}
+                                                </TableCell>
+                                            )}
                                             <TableCell className="text-right">
                                                 <Button
                                                     variant="ghost"
@@ -428,12 +630,24 @@ export default function VSEMovementForm({
                                                 </Button>
                                             </TableCell>
                                         </TableRow>
-                                    ))
+                                        )
+                                    })
                                 ) : (
                                     <TableRow>
-                                        <TableCell colSpan={3} className="h-24 text-center text-muted-foreground">
+                                        <TableCell colSpan={isVseSale ? 5 : 3} className="h-24 text-center text-muted-foreground">
                                             {loading ? "Loading products..." : "No products added yet."}
                                         </TableCell>
+                                    </TableRow>
+                                )}
+                                {isVseSale && selectedItems.length > 0 && (
+                                    <TableRow className="bg-muted/30 font-bold">
+                                        <TableCell colSpan={3} className="text-right uppercase text-xs tracking-wider">
+                                            Total Amount
+                                        </TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                            GH₵ {saleTotalAmount.toFixed(2)}
+                                        </TableCell>
+                                        <TableCell />
                                     </TableRow>
                                 )}
                             </TableBody>

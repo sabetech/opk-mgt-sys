@@ -166,6 +166,45 @@ export default function OrderDetails() {
             return
         }
 
+        // VSE sales: stock already left the warehouse via the loadout, so
+        // approval only marks the order approved and posts the deferred
+        // vse_movements tally rows. No warehouse order, no stock deduction.
+        const isVseOrder = order.order_types?.name === 'vse'
+        if (isVseOrder) {
+            if (!order.customer_id) {
+                toast.error("VSE order has no VSE customer attached.")
+                return
+            }
+            setApproving(true)
+            try {
+                await pb.collection('orders').update(order.id, {
+                    status: 'approved',
+                    amount_tendered: tendered
+                })
+
+                const dateStr = String(order.date_time).slice(0, 10)
+                for (const item of items) {
+                    if (!item.product_id) continue
+                    await pb.collection('vse_movements').create({
+                        date: dateStr,
+                        vse_id: order.customer_id,
+                        product_id: item.product_id,
+                        quantity: item.quantity,
+                        movement_type: 'sold',
+                    })
+                }
+
+                toast.success("VSE sale approved and recorded!")
+                setOrder({ ...order, status: 'approved', amount_tendered: tendered })
+            } catch (err) {
+                console.error("Error approving VSE order:", err)
+                toast.error("Failed to approve VSE order.")
+            } finally {
+                setApproving(false)
+            }
+            return
+        }
+
         setApproving(true)
         try {
             // Determine sale type (retail vs wholesale) from customer type
@@ -259,7 +298,10 @@ export default function OrderDetails() {
     }
 
     const isSameDayOrder = order && isSameDay(new Date(order.date_time), new Date())
-    const canReturn = order?.status === 'approved' && isSameDayOrder && profile?.role !== 'auditor'
+    const isVseOrderView = order?.order_types?.name === 'vse'
+    // VSE sales never touch warehouse_stock, so the warehouse-restock
+    // return flow does not apply to them.
+    const canReturn = order?.status === 'approved' && isSameDayOrder && profile?.role !== 'auditor' && !isVseOrderView
     const hasReturnableItems = items.some((item) => getReturnableQty(item) > 0)
 
     const totalRefund = Object.entries(returnQuantities).reduce((sum, [saleId, qty]) => {
@@ -600,7 +642,9 @@ export default function OrderDetails() {
                     </Card>
 
                     <div className="bg-muted/30 p-4 rounded-lg border border-dashed text-xs text-muted-foreground italic">
-                        Once approved, the order status changes to "approved" and the payment amount is permanently recorded.
+                        {isVseOrderView
+                            ? 'VSE sale: once approved, the sale is recorded against the VSE loadout. No warehouse order is created and main stock is untouched (it left via the loadout).'
+                            : 'Once approved, the order status changes to "approved" and the payment amount is permanently recorded.'}
                     </div>
 
                     {canReturn && hasReturnableItems && (

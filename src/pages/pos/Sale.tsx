@@ -19,6 +19,7 @@ import { generateOrderNumber } from "@/lib/orderNumber"
 import { buildSaleReceiptHtml, buildProformaHtml, generateProformaReference, printReceiptHtml, type CompletedSale, type ProformaInvoice } from "@/lib/receipt"
 import { suggestProduct } from "@/lib/productSearch"
 import { fetchCustomerBalance } from "@/lib/customerBalance"
+import { assertEmptiesPurchaseAllowed } from "@/lib/emptiesGuard"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -409,25 +410,21 @@ export default function Sale() {
                 const totalQuantity = returnableItems.reduce((sum, item) => sum + item.quantity, 0)
 
                 // 1. Insert into empties_log (full movement kept so crate debt
-                // is tracked; deposit_* flags let the balance hook allow the
-                // shortfall portion instead of rejecting it)
-                let logData: any
-                try {
-                    logData = await pb.collection('empties_log').create({
-                        date: new Date().toISOString(),
-                        customer_id: selectedCustomer.id,
-                        activity: 'customer_purchase',
-                        total_quantity: totalQuantity,
-                        deposit_qty: depositQty,
-                        deposit_total: depositTotal,
-                    })
-                } catch (logError: any) {
-                    const msg = logError.response?.data?.message || logError.message || ''
-                    if (msg.includes('Insufficient empties balance')) {
-                        throw new Error(msg)
-                    }
-                    throw logError
-                }
+                // is tracked; the deposit covers the shortfall portion, and
+                // the guard below backstops the UI check with live truth)
+                await assertEmptiesPurchaseAllowed(
+                    selectedCustomer.id,
+                    totalQuantity,
+                    depositQty
+                )
+                const logData = await pb.collection('empties_log').create({
+                    date: new Date().toISOString(),
+                    customer_id: selectedCustomer.id,
+                    activity: 'customer_purchase',
+                    total_quantity: totalQuantity,
+                    deposit_qty: depositQty,
+                    deposit_total: depositTotal,
+                })
 
                 // 2. Insert into empties_log_detail
                 const detailsToInsert = returnableItems.map(item => ({

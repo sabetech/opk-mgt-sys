@@ -34,7 +34,7 @@ type Transaction = {
     id: string
     time: string
     description: string
-    type: 'supplier_receipt' | 'vse_loadout' | 'retail_sale' | 'wholesale_sale' | 'breakage' | 'promo_out' | 'promo_reimbursement' | 'opening_stock'
+    type: 'supplier_receipt' | 'vse_loadout' | 'vse_return' | 'retail_sale' | 'wholesale_sale' | 'breakage' | 'promo_out' | 'promo_reimbursement' | 'opening_stock'
     quantity: number
     balance: number
 }
@@ -107,6 +107,7 @@ export default function InventoryLog() {
                     if (log.type === 'opening_stock') openingStock += qty
                     else if (log.type === 'supplier_receipt') totalReceived += qty
                     else if (log.type === 'vse_loadout') vsesSent += Math.abs(qty)
+                    else if (log.type === 'vse_return') vsesReturned += Math.abs(qty)
                     else if (log.type === 'retail_sale' || log.type === 'wholesale_sale') totalSold += Math.abs(qty)
                     else if (log.type === 'breakage') breakages += Math.abs(qty)
                     else if (log.type === 'promo_out') promoStock += Math.abs(qty)
@@ -166,6 +167,7 @@ export default function InventoryLog() {
     const getTransactionIcon = (type: Transaction['type']) => {
         switch (type) {
             case 'supplier_receipt': return <ArrowDownLeft className="h-4 w-4 text-green-500" />
+            case 'vse_return': return <ArrowDownLeft className="h-4 w-4 text-teal-500" />
             case 'promo_reimbursement': return <RefreshCcw className="h-4 w-4 text-blue-500" />
             case 'opening_stock': return <Package className="h-4 w-4 text-gray-500" />
             case 'breakage': return <XCircle className="h-4 w-4 text-red-500" />

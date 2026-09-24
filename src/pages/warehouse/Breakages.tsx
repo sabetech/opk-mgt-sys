@@ -231,16 +231,55 @@ export default function Breakages() {
 
         setSaving(true)
         try {
+            const dateStr = new Date().toISOString().split('T')[0]
+            const failures: string[] = []
             for (const item of breakageItems) {
-                await pb.collection('breakages').create({
+                const record = await pb.collection('breakages').create({
                     date,
                     product_id: item.productId,
                     quantity: item.quantity,
                     reason: reason.trim()
                 })
+
+                // No server hooks: deduct stock + audit log here (same
+                // pattern as the receivables pages).
+                try {
+                    const stock = await pb.collection('warehouse_stock')
+                        .getFirstListItem(`product_id = "${item.productId}"`, { fields: 'id, quantity' })
+                        .catch((err) => {
+                            if (err?.status === 404) return null
+                            throw err
+                        })
+                    if (stock) {
+                        await pb.collection('warehouse_stock').update(stock.id, {
+                            quantity: (stock.quantity || 0) - item.quantity,
+                        })
+                    } else {
+                        await pb.collection('warehouse_stock').create({
+                            product_id: item.productId,
+                            quantity: -item.quantity,
+                        })
+                    }
+                    await pb.collection('inventory_logs').create({
+                        date: dateStr,
+                        product_id: item.productId,
+                        type: 'breakage',
+                        quantity: -item.quantity,
+                        reference_id: record.id,
+                        reference_table: 'breakages',
+                        description: reason.trim(),
+                    })
+                } catch (err) {
+                    console.error(`Failed to deduct stock for breakage ${item.productName}:`, err)
+                    failures.push(item.productName)
+                }
             }
 
-            toast.success('Breakages recorded successfully and stock updated!')
+            if (failures.length > 0) {
+                toast.warning(`Breakages recorded, but stock update needs review: ${failures.join(', ')}`)
+            } else {
+                toast.success('Breakages recorded successfully and stock updated!')
+            }
             setBreakageItems([])
             setReason("")
 

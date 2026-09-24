@@ -108,12 +108,19 @@ export default function AddLoadout() {
         }
 
         setSaving(true)
+        // No server hooks: stock effects happen explicitly below. The header
+        // is still created pending first so a mid-submit failure never
+        // leaves an approved loadout with partial items.
+        let loadout: { id: string } | null = null
         try {
+            const dateStr = date.toISOString().split('T')[0]
+            const vseName = vseList.find((v) => v.id === selectedVse)?.name || 'VSE'
+
             // 1. Create Loadout Header
-            const loadout = await pb.collection('loadouts').create({
-                date: date.toISOString().split('T')[0],
+            loadout = await pb.collection('loadouts').create({
+                date: dateStr,
                 vse_id: selectedVse,
-                status: 'approved' // Set to approved to trigger stock deduction immediately
+                status: 'pending'
             })
 
             // 2. Create Loadout Items
@@ -125,13 +132,65 @@ export default function AddLoadout() {
                 })
             }
 
-            toast.success('Loadout submitted and inventory updated')
+            // 3. Approve now that items exist
+            await pb.collection('loadouts').update(loadout.id, { status: 'approved' })
+
+            // 4. Deduct stock + audit log per line (replaces the old
+            // loadout server hook)
+            const failures: string[] = []
+            for (const item of selectedItems) {
+                try {
+                    const stock = await pb.collection('warehouse_stock')
+                        .getFirstListItem(`product_id = "${item.productId}"`, { fields: 'id, quantity' })
+                        .catch((err) => {
+                            if (err?.status === 404) return null
+                            throw err
+                        })
+                    if (stock) {
+                        await pb.collection('warehouse_stock').update(stock.id, {
+                            quantity: (stock.quantity || 0) - item.quantity,
+                        })
+                    } else {
+                        await pb.collection('warehouse_stock').create({
+                            product_id: item.productId,
+                            quantity: -item.quantity,
+                        })
+                    }
+                    await pb.collection('inventory_logs').create({
+                        date: dateStr,
+                        product_id: item.productId,
+                        type: 'vse_loadout',
+                        quantity: -item.quantity,
+                        reference_id: loadout.id,
+                        reference_table: 'loadouts',
+                        description: `VSE Loadout - ${vseName}`,
+                    })
+                } catch (err) {
+                    console.error(`Failed to deduct stock for loadout item ${item.productName}:`, err)
+                    failures.push(item.productName)
+                }
+            }
+
+            if (failures.length > 0) {
+                toast.warning(`Loadout approved, but stock update needs review: ${failures.join(', ')}`)
+            } else {
+                toast.success('Loadout submitted and inventory updated')
+            }
 
             // Reset form
             setSelectedVse("")
             setSelectedItems([])
             setDate(undefined)
         } catch (error) {
+            // Best-effort cleanup of the orphaned pending header so a
+            // half-written loadout never sits unapproved with partial items
+            if (loadout) {
+                try {
+                    await pb.collection('loadouts').delete(loadout.id)
+                } catch {
+                    // ignore rollback errors
+                }
+            }
             console.error('Error submitting loadout:', error)
             toast.error('Failed to submit loadout')
         } finally {
