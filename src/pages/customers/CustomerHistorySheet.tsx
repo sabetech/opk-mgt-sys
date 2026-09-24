@@ -19,6 +19,7 @@ import {
 import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
+import { fetchEmptiesDisplayMode, formatEmptiesBalance, type EmptiesDisplayMode } from "@/lib/emptiesDisplay"
 
 interface CustomerHistorySheetProps {
     customer: {
@@ -44,11 +45,13 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
     const [loading, setLoading] = useState(false)
     const [timeline, setTimeline] = useState<TimelineEntry[]>([])
     const [netBalance, setNetBalance] = useState<number | null>(null)
+    const [emptiesMode, setEmptiesMode] = useState<EmptiesDisplayMode>("debit")
     const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
 
     useEffect(() => {
         if (open && customer) {
             fetchHistory()
+            fetchEmptiesDisplayMode().then(setEmptiesMode).catch(() => undefined)
         }
     }, [open, customer])
 
@@ -145,9 +148,15 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
             entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
             setTimeline(entries)
 
-            // Net crates balance from the empties ledger only (orders would
-            // double-count purchases already logged as customer_purchase)
+            // Net crates balance: stored opening + empties ledger (orders would
+            // double-count purchases already logged as customer_purchase, so
+            // only the ledger and the opening feed this figure)
+            const customerRecord = await pb.collection('customers').getOne(customer.id, {
+                fields: 'id, balance',
+            }).catch(() => null)
+            const opening = customerRecord?.balance || 0
             setNetBalance(
+                opening +
                 (empties || []).reduce(
                     (sum: number, log) =>
                         sum + (log.activity === 'customer_empties_return' ? 1 : -1) * (log.total_quantity || 0),
@@ -182,9 +191,17 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                         {netBalance !== null && (
                             <span className="block mt-1">
                                 Net crates balance:{" "}
-                                <span className={cn("font-bold", netBalance < 0 ? "text-red-600" : "text-green-600")}>
-                                    {netBalance > 0 ? `+${netBalance}` : netBalance}
-                                </span>
+                                {(() => {
+                                    const formatted = formatEmptiesBalance(netBalance, emptiesMode)
+                                    return (
+                                        <span className={cn(
+                                            "font-bold",
+                                            formatted.tone === "debit" ? "text-red-600" : formatted.tone === "credit" ? "text-green-600" : undefined
+                                        )}>
+                                            {formatted.text}
+                                        </span>
+                                    )
+                                })()}
                             </span>
                         )}
                     </SheetDescription>

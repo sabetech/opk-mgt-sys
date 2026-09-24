@@ -4,6 +4,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select"
 import { Search, Save, Loader2 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { toast } from "sonner"
@@ -22,6 +29,10 @@ interface CrateDeposit {
     amount: number
 }
 
+interface EmptiesDisplay {
+    mode: "debit" | "raw"
+}
+
 interface Product {
     id: string
     sku_name: string
@@ -33,16 +44,19 @@ export default function Settings() {
     const [savingStock, setSavingStock] = useState(false)
     const [savingSurcharge, setSavingSurcharge] = useState(false)
     const [savingDeposit, setSavingDeposit] = useState(false)
+    const [savingEmptiesDisplay, setSavingEmptiesDisplay] = useState(false)
 
     const [stockThresholds, setStockThresholds] = useState<StockThresholds>({ low_max: 20, medium_max: 50 })
     const [surcharge, setSurcharge] = useState<WholesaleSurcharge>({ amount: 2, product_ids: [] })
     const [crateDeposit, setCrateDeposit] = useState<CrateDeposit>({ amount: 200 })
+    const [emptiesDisplay, setEmptiesDisplay] = useState<EmptiesDisplay>({ mode: "debit" })
     const [products, setProducts] = useState<Product[]>([])
     const [productSearch, setProductSearch] = useState("")
 
     const [stockSettingsId, setStockSettingsId] = useState<string | null>(null)
     const [surchargeSettingsId, setSurchargeSettingsId] = useState<string | null>(null)
     const [depositSettingsId, setDepositSettingsId] = useState<string | null>(null)
+    const [emptiesDisplaySettingsId, setEmptiesDisplaySettingsId] = useState<string | null>(null)
 
     useEffect(() => {
         const fetchSettings = async () => {
@@ -81,6 +95,16 @@ export default function Settings() {
                     setDepositSettingsId(depositRecord.id)
                 } catch {
                     // Record doesn't exist yet (defaults to 200 GHc)
+                }
+
+                // Fetch empties balance display mode (debit Dr/Cr vs raw stored)
+                try {
+                    const displayRecord = await pb.collection('app_settings').getFirstListItem('key = "empties_display"')
+                    const mode = (displayRecord.value as EmptiesDisplay | null)?.mode
+                    setEmptiesDisplay({ mode: mode === "raw" ? "raw" : "debit" })
+                    setEmptiesDisplaySettingsId(displayRecord.id)
+                } catch {
+                    // Record doesn't exist yet (defaults to debit Dr/Cr)
                 }
             } catch (err) {
                 console.error("Error fetching settings:", err)
@@ -138,8 +162,30 @@ export default function Settings() {
         }
     }
 
-    const handleSaveDeposit = async () => {
-        if (crateDeposit.amount < 0) {
+    const handleSaveEmptiesDisplay = async () => {
+        setSavingEmptiesDisplay(true)
+        try {
+            if (emptiesDisplaySettingsId) {
+                await pb.collection('app_settings').update(emptiesDisplaySettingsId, {
+                    value: emptiesDisplay
+                })
+            } else {
+                const record = await pb.collection('app_settings').create({
+                    key: 'empties_display',
+                    value: emptiesDisplay
+                })
+                setEmptiesDisplaySettingsId(record.id)
+            }
+            toast.success("Empties display settings saved!")
+        } catch (err) {
+            console.error("Error saving empties display settings:", err)
+            toast.error("Failed to save empties display settings")
+        } finally {
+            setSavingEmptiesDisplay(false)
+        }
+    }
+
+    const handleSaveDeposit = async () => {        if (crateDeposit.amount < 0) {
             toast.error("Deposit amount cannot be negative")
             return
         }
@@ -350,6 +396,40 @@ export default function Settings() {
                     <Button onClick={handleSaveDeposit} disabled={savingDeposit} className="bg-amber-700 hover:bg-amber-800 gap-2">
                         {savingDeposit ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         {savingDeposit ? "Saving..." : "Save Crate Deposit"}
+                    </Button>
+                </CardContent>
+            </Card>
+            {/* Empties Balance Display */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Empties Balance Display</CardTitle>
+                    <CardDescription>
+                        Stored balances are credit-scale (purchases subtract), but the business
+                        reads debit-scale (positive = crates the customer owes, negative = credit
+                        with OPK). Debit mode shows e.g. "291 Dr" / "162 Cr" to match the
+                        empties-balance spreadsheet. POS math is unaffected either way.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2 max-w-xs">
+                        <Label htmlFor="empties_display_mode">Display Mode</Label>
+                        <Select
+                            value={emptiesDisplay.mode}
+                            onValueChange={(v) => setEmptiesDisplay({ mode: v === "raw" ? "raw" : "debit" })}
+                        >
+                            <SelectTrigger id="empties_display_mode">
+                                <SelectValue placeholder="Choose display mode" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="debit">Debit / Credit (291 Dr, 162 Cr)</SelectItem>
+                                <SelectItem value="raw">Raw stored values</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <Button onClick={handleSaveEmptiesDisplay} disabled={savingEmptiesDisplay} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                        {savingEmptiesDisplay ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        {savingEmptiesDisplay ? "Saving..." : "Save Display Settings"}
                     </Button>
                 </CardContent>
             </Card>

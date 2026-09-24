@@ -95,6 +95,16 @@ async function confirm(message) {
 
 const pb = new PocketBase(PB_URL);
 
+// Cloudflare (error 1010) blocks non-browser clients on the hosted server,
+// so send a browser User-Agent on every request.
+const BROWSER_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
+const origFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (url, init = {}) =>
+    origFetch(url, {
+        ...init,
+        headers: { ...(init.headers || {}), 'User-Agent': BROWSER_UA },
+    });
+
 // ---------------------------------------------------------------------------
 // Field builders
 // ---------------------------------------------------------------------------
@@ -356,7 +366,7 @@ async function main() {
         fld('relation', 'product_id', { collectionId: products.id, required: true, maxSelect: 1 }),
         fld('select', 'type', {
             required: true,
-            values: ['supplier_receipt', 'vse_loadout', 'retail_sale', 'wholesale_sale', 'breakage', 'promo_out', 'promo_reimbursement', 'opening_stock', 'adjustment_increase', 'adjustment_decrease', 'customer_return'],
+            values: ['supplier_receipt', 'vse_loadout', 'vse_return', 'retail_sale', 'wholesale_sale', 'breakage', 'promo_out', 'promo_reimbursement', 'opening_stock', 'adjustment_increase', 'adjustment_decrease', 'customer_return'],
         }),
         fld('number', 'quantity', { required: true }),
         fld('text', 'reference_id'),
@@ -467,8 +477,9 @@ async function main() {
 
     // Per-VSE field performance: stock sold to end customers and unsold stock
     // returned, recorded per VSE per day. Powers the Loadout Summary page
-    // (Quantity Sold / Quantity Returned columns). No warehouse_stock mutation:
-    // stock already left the warehouse via the loadout.
+    // (Quantity Sold / Quantity Returned columns). Sales never touch
+    // warehouse_stock (stock left via the loadout); returns recorded from the
+    // warehouse restock it with a vse_return inventory log.
     await ensureCollection('vse_movements', 'base', [
         fld('date', 'date', { required: true }),
         fld('relation', 'vse_id', { collectionId: customers.id, required: true, maxSelect: 1 }),
@@ -782,6 +793,20 @@ async function main() {
                 // app_settings collection may not exist in dry-run / fresh flows
             }
         }
+        // Seed empties_display setting (debit Dr/Cr vs raw stored values)
+        try {
+            await pb.collection('app_settings').getFirstListItem('key = "empties_display"');
+        } catch {
+            try {
+                await pb.collection('app_settings').create({
+                    key: 'empties_display',
+                    value: { mode: 'debit' }
+                });
+                console.log('  [ok] seeded empties_display app_setting (debit Dr/Cr)');
+            } catch {
+                // app_settings collection may not exist in dry-run / fresh flows
+            }
+        }
     }
 
     // Also create inventory_logs fields that may be missing on existing DBs
@@ -802,6 +827,21 @@ async function main() {
 
         // Add 'customer_return' to the type select values if missing
         const typeField = inventoryLogsCol.fields.find((f) => f.name === 'type');
+        const ensureTypeValue = async (value) => {
+            const col = (await pb.collections.getFullList()).find((c) => c.name === 'inventory_logs');
+            const field = col.fields.find((f) => f.name === 'type');
+            if (field && Array.isArray(field.values) && !field.values.includes(value)) {
+                const updatedFields = col.fields.map((f) =>
+                    f.name === 'type' ? { ...f, values: [...f.values, value] } : f
+                );
+                if (!flags.dryRun) {
+                    await pb.collections.update(col.id, { fields: updatedFields });
+                    console.log(`  [ok] added "${value}" to inventory_logs.type values`);
+                } else {
+                    console.log(`  [dry-run] would add "${value}" to inventory_logs.type values`);
+                }
+            }
+        };
         if (typeField && Array.isArray(typeField.values) && !typeField.values.includes('customer_return')) {
             const updatedValues = [...typeField.values, 'customer_return'];
             const updatedFields = inventoryLogsCol.fields.map((f) =>
@@ -814,6 +854,7 @@ async function main() {
                 console.log('  [dry-run] would add "customer_return" to inventory_logs.type values');
             }
         }
+        await ensureTypeValue('vse_return');
     }
 
     // Add ex_factory_price to products collection if missing on existing DBs

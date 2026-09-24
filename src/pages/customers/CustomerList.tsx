@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label"
 import { Edit, Trash2, Search, Loader2, History } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { fetchCustomerBalances } from "@/lib/customerBalance"
+import { fetchEmptiesDisplayMode, formatEmptiesBalance, type EmptiesDisplayMode } from "@/lib/emptiesDisplay"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 import CustomerHistorySheet from "./CustomerHistorySheet"
@@ -58,6 +59,7 @@ export default function CustomerList() {
     // Live crates balances (opening + empties ledger). The stored
     // customers.balance field is opening-only — see lib/customerBalance.
     const [liveBalances, setLiveBalances] = useState<Record<string, number>>({})
+    const [emptiesMode, setEmptiesMode] = useState<EmptiesDisplayMode>("debit")
     const [searchTerm, setSearchTerm] = useState("")
     const [filterType, setFilterType] = useState("All")
     const [customerTypes, setCustomerTypes] = useState<CustomerType[]>([])
@@ -109,6 +111,8 @@ export default function CustomerList() {
 
             const typesData = await pb.collection('customer_types').getFullList({ sort: 'name' })
             setCustomerTypes(typesData.map((t) => ({ id: t.id, name: t.name })))
+
+            setEmptiesMode(await fetchEmptiesDisplayMode())
 
         } catch (err) {
             console.error("Error fetching customers:", err)
@@ -253,7 +257,25 @@ export default function CustomerList() {
                                             )}
                                         </div>
                                     </TableCell>
-                                    <TableCell className="text-right">{liveBalances[customer.id] ?? customer.balance}</TableCell>
+                                    <TableCell className="text-right">
+                                        {(() => {
+                                            const formatted = formatEmptiesBalance(
+                                                liveBalances[customer.id] ?? customer.balance ?? 0,
+                                                emptiesMode
+                                            )
+                                            return (
+                                                <span className={
+                                                    formatted.tone === "debit"
+                                                        ? "text-red-600 font-medium"
+                                                        : formatted.tone === "credit"
+                                                            ? "text-green-600 font-medium"
+                                                            : undefined
+                                                }>
+                                                    {formatted.text}
+                                                </span>
+                                            )
+                                        })()}
+                                    </TableCell>
                                     {profile?.role !== 'auditor' && (
                                         <TableCell className="text-right">
                                             <div className="flex justify-end gap-2">
