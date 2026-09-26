@@ -499,8 +499,10 @@ async function main() {
 
     // VSE field sales (recorded in the field by VSE logins, dual approval).
     // sale_status is approved by account_manager, empties_status by
-    // empties_manager; both approved => validated => auto-posted to the
-    // Loadout Summary. Never touches warehouse_stock (stock left at loadout).
+    // empties_manager; each side posts to the Loadout Summary independently
+    // on its own approval (sale_posted / empties_posted, exactly-once each;
+    // posted_to_summary flips when both are in). Never touches
+    // warehouse_stock (stock left at loadout).
     // NOTE: this server's PocketBase build rejects @request.data in rules, so
     // approval-field locking is enforced in the app/lib layer (reviewed_by
     // audit trail) rather than in API rules.
@@ -521,6 +523,8 @@ async function main() {
         fld('date', 'empties_reviewed_at'),
         fld('text', 'empties_reject_reason'),
         fld('bool', 'posted_to_summary'),
+        fld('bool', 'sale_posted'),
+        fld('bool', 'empties_posted'),
     ], {
         listRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || ${VSE_OWNER}`,
         viewRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || ${VSE_OWNER}`,
@@ -870,6 +874,45 @@ async function main() {
             } else {
                 console.log('  [dry-run] would add ex_factory_price field to products');
             }
+        }
+    }
+
+    // Per-dimension posted flags on vse_field_sales (sale_posted /
+    // empties_posted) for independent sale/empties posting. Backfills from
+    // posted_to_summary so already-counted rows post neither side again.
+    const fieldSalesCol = (await pb.collections.getFullList()).find((c) => c.name === 'vse_field_sales');
+    if (fieldSalesCol) {
+        const existingFieldNames = fieldSalesCol.fields.map((f) => f.name);
+        const missingFlags = ['sale_posted', 'empties_posted'].filter((n) => !existingFieldNames.includes(n));
+        if (missingFlags.length > 0) {
+            const additions = missingFlags.map((n) => fld('bool', n));
+            if (!flags.dryRun) {
+                await pb.collections.update(fieldSalesCol.id, {
+                    fields: [...fieldSalesCol.fields, ...additions]
+                });
+                console.log(`  [ok] added ${missingFlags.join(', ')} to vse_field_sales`);
+            } else {
+                console.log(`  [dry-run] would add ${missingFlags.join(', ')} to vse_field_sales`);
+            }
+        }
+        if (!flags.dryRun) {
+            const counted = await pb.collection('vse_field_sales').getFullList({
+                filter: 'posted_to_summary = true',
+                fields: 'id, sale_posted, empties_posted',
+            });
+            let backfilled = 0;
+            for (const row of counted) {
+                const patch = {};
+                if (!row.sale_posted) patch.sale_posted = true;
+                if (!row.empties_posted) patch.empties_posted = true;
+                if (Object.keys(patch).length > 0) {
+                    await pb.collection('vse_field_sales').update(row.id, patch);
+                    backfilled += 1;
+                }
+            }
+            console.log(`  [ok] backfilled posted flags on ${backfilled}/${counted.length} counted field sale(s)`);
+        } else {
+            console.log('  [dry-run] would backfill posted flags from posted_to_summary');
         }
     }
 

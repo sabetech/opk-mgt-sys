@@ -5,7 +5,7 @@ export default function VSEEmptiesApprovals() {
         <FieldSaleApprovalQueue
             dimension="empties"
             title="VSE Empties Approvals"
-            description="Review empties counts reported with VSE field sales. Approval validates the empties side."
+            description="Review empties counts reported with VSE field sales. Approving posts the empties side to the Loadout Summary immediately."
         />
     )
 }

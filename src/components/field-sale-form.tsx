@@ -37,6 +37,10 @@ interface FieldSaleFormProps {
     initialDate?: string
     initialItems?: FieldSaleInitialItem[]
     initialEmpties?: number
+    /** Partial-post state: items lock once either side posts, empties lock
+     * once the empties side posts. New sales default both false. */
+    salePosted?: boolean
+    emptiesPosted?: boolean
     submitLabel: string
     onSaved: () => void
     onCancelEdit?: () => void
@@ -49,11 +53,18 @@ export default function FieldSaleForm({
     initialDate,
     initialItems,
     initialEmpties,
+    salePosted = false,
+    emptiesPosted = false,
     submitLabel,
     onSaved,
     onCancelEdit,
 }: FieldSaleFormProps) {
     const isEdit = !!saleId
+    // Items feed both the sold rows and the empties split, so they lock
+    // once either side has posted. The empties count stays editable until
+    // its own side posts.
+    const itemsLocked = isEdit && (salePosted || emptiesPosted)
+    const emptiesLocked = isEdit && emptiesPosted
     const [date, setDate] = useState<Date | undefined>(() => {
         if (!initialDate) return new Date()
         const parsed = new Date(`${String(initialDate).slice(0, 10)}T12:00:00`)
@@ -174,39 +185,50 @@ export default function FieldSaleForm({
             toast.error('Please pick a date')
             return
         }
-        if (selectedItems.length === 0) {
+        if (itemsLocked && emptiesLocked) {
+            toast.error('This sale is already counted and cannot be edited')
+            return
+        }
+        if (!itemsLocked && selectedItems.length === 0) {
             toast.error('Please add at least one product')
             return
         }
-        if (selectedItems.some((item) => item.quantity <= 0)) {
+        if (!itemsLocked && selectedItems.some((item) => item.quantity <= 0)) {
             toast.error('Please enter valid quantities for all products')
             return
         }
         const emptiesNum = parseInt(empties, 10)
-        if (isNaN(emptiesNum) || emptiesNum < 0) {
+        if (!emptiesLocked && (isNaN(emptiesNum) || emptiesNum < 0)) {
             toast.error('Enter a valid number of empties received (0 or more)')
             return
         }
         // Oversell guard: no line may exceed what's left in the car
-        const overSold = selectedItems.find(
-            (item) => item.quantity > (car[item.productId]?.remaining ?? 0)
-        )
-        if (overSold) {
-            const remaining = car[overSold.productId]?.remaining ?? 0
-            toast.error(`Only ${remaining} × ${overSold.productName} left in the car`)
-            return
+        // (skipped when items are locked — nothing can change anyway)
+        if (!itemsLocked) {
+            const overSold = selectedItems.find(
+                (item) => item.quantity > (car[item.productId]?.remaining ?? 0)
+            )
+            if (overSold) {
+                const remaining = car[overSold.productId]?.remaining ?? 0
+                toast.error(`Only ${remaining} × ${overSold.productName} left in the car`)
+                return
+            }
         }
 
         setSaving(true)
         try {
             const dateStr = date.toISOString().split('T')[0]
-            const payloadItems = selectedItems.map((item) => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                unitPrice: catalog[item.productId]?.retail ?? 0,
-            }))
             if (isEdit && saleId) {
-                await updateFieldSale(saleId, { emptiesReceived: emptiesNum, items: payloadItems })
+                await updateFieldSale(saleId, {
+                    ...(itemsLocked ? {} : {
+                        items: selectedItems.map((item) => ({
+                            productId: item.productId,
+                            quantity: item.quantity,
+                            unitPrice: catalog[item.productId]?.retail ?? 0,
+                        })),
+                    }),
+                    ...(emptiesLocked ? {} : { emptiesReceived: emptiesNum }),
+                })
                 toast.success('Sale updated and resubmitted for approval')
             } else {
                 const userId = pb.authStore.model?.id || ''
@@ -215,7 +237,11 @@ export default function FieldSaleForm({
                     vseCustomerId,
                     createdBy: userId,
                     emptiesReceived: emptiesNum,
-                    items: payloadItems,
+                    items: selectedItems.map((item) => ({
+                        productId: item.productId,
+                        quantity: item.quantity,
+                        unitPrice: catalog[item.productId]?.retail ?? 0,
+                    })),
                 })
                 toast.success('Field sale recorded — awaiting approvals')
             }
@@ -313,10 +339,14 @@ export default function FieldSaleForm({
             <Card>
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base">Products Sold</CardTitle>
-                    <CardDescription>Retail prices apply.</CardDescription>
+                    <CardDescription>
+                        {itemsLocked
+                            ? "Locked — this side is already counted."
+                            : "Retail prices apply."}
+                    </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    {!loading && (
+                    {!loading && !itemsLocked && (
                         <ProductSelector
                             products={carProducts}
                             selectedItems={selectedItems}
@@ -359,7 +389,7 @@ export default function FieldSaleForm({
                                                         max={Math.max(0, car[item.productId]?.remaining ?? 0)}
                                                         value={item.quantity}
                                                         onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
-                                                        disabled={saving}
+                                                        disabled={saving || itemsLocked}
                                                         className="h-11 text-right font-bold text-base px-2"
                                                     />
                                                 </TableCell>
@@ -373,7 +403,7 @@ export default function FieldSaleForm({
                                                         size="icon"
                                                         className="text-red-500 hover:text-red-700 hover:bg-red-50"
                                                         onClick={() => removeItem(item.id)}
-                                                        disabled={saving}
+                                                        disabled={saving || itemsLocked}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
@@ -403,9 +433,11 @@ export default function FieldSaleForm({
                 <CardHeader className="pb-3">
                     <CardTitle className="text-base">Empties Received</CardTitle>
                     <CardDescription>
-                        {returnableQty > 0
-                            ? `${returnableQty} returnable crate(s) sold — adjust if you got back fewer or more.`
-                            : "No returnables in this sale."}
+                        {emptiesLocked
+                            ? "Locked — empties already counted."
+                            : returnableQty > 0
+                                ? `${returnableQty} returnable crate(s) sold — adjust if you got back fewer or more.`
+                                : "No returnables in this sale."}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -418,7 +450,7 @@ export default function FieldSaleForm({
                                 setEmpties(e.target.value)
                                 setEmptiesTouched(true)
                             }}
-                            disabled={saving}
+                            disabled={saving || emptiesLocked}
                             className="h-12 text-lg font-bold flex-1"
                             placeholder="0"
                         />
@@ -454,7 +486,7 @@ export default function FieldSaleForm({
                         Cancel
                     </Button>
                 )}
-                <Button className="h-12 flex-1 text-base" onClick={handleSubmit} disabled={saving || selectedItems.length === 0}>
+                <Button className="h-12 flex-1 text-base" onClick={handleSubmit} disabled={saving || selectedItems.length === 0 || (itemsLocked && emptiesLocked)}>
                     {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     {saving ? "Saving..." : submitLabel}
                 </Button>

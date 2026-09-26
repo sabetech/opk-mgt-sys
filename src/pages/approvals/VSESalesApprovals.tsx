@@ -5,7 +5,7 @@ export default function VSESalesApprovals() {
         <FieldSaleApprovalQueue
             dimension="sale"
             title="VSE Sales Approvals"
-            description="Review field sales submitted by VSEs. Approval validates the sale side; the sale counts once empties are approved too."
+            description="Review field sales submitted by VSEs. Approving posts the sale side to the Loadout Summary immediately."
         />
     )
 }

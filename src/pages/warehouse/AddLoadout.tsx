@@ -40,6 +40,8 @@ export default function AddLoadout() {
     // DB State
     const [products, setProducts] = useState<Product[]>([])
     const [vseList, setVseList] = useState<{ id: string, name: string }[]>([])
+    // product_id -> current warehouse quantity (load-time snapshot)
+    const [stockByProduct, setStockByProduct] = useState<Record<string, number>>({})
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
 
@@ -49,7 +51,8 @@ export default function AddLoadout() {
             setLoading(true)
             await Promise.all([
                 fetchProducts(),
-                fetchVses()
+                fetchVses(),
+                fetchStock()
             ])
             setLoading(false)
         }
@@ -93,6 +96,22 @@ export default function AddLoadout() {
         }
     }
 
+    const fetchStock = async () => {
+        try {
+            const data = await pb.collection('warehouse_stock').getFullList({
+                fields: 'product_id, quantity'
+            })
+            const map: Record<string, number> = {}
+            for (const s of data) {
+                map[s.product_id] = s.quantity || 0
+            }
+            setStockByProduct(map)
+        } catch (error) {
+            console.error('Error fetching stock levels:', error)
+            toast.error('Failed to load stock levels')
+        }
+    }
+
     const handleItemsChange = (items: SelectedItem[]) => {
         setSelectedItems(items)
     }
@@ -104,6 +123,16 @@ export default function AddLoadout() {
     const handleSubmit = async () => {
         if (!date || !selectedVse || selectedItems.length === 0) {
             toast.error('Please complete all fields')
+            return
+        }
+
+        // Oversell guard: no line may exceed available warehouse stock
+        const overdrawn = selectedItems.find(
+            (item) => item.quantity > (stockByProduct[item.productId] ?? 0)
+        )
+        if (overdrawn) {
+            const available = stockByProduct[overdrawn.productId] ?? 0
+            toast.error(`Only ${available.toLocaleString()} × ${overdrawn.productName} in stock`)
             return
         }
 
@@ -313,6 +342,10 @@ export default function AddLoadout() {
                         onItemsChange={handleItemsChange}
                         quantityLabel="Quantity to Load"
                         disabled={loading || saving}
+                        filterCondition={(product) => (stockByProduct[product.id] ?? 0) > 0}
+                        itemState={(product) => ({
+                            hint: `(${(stockByProduct[product.id] ?? 0).toLocaleString()})`,
+                        })}
                     />
 
                     {/* Items List */}
@@ -329,8 +362,8 @@ export default function AddLoadout() {
                             <TableBody>
                                 {selectedItems.length > 0 ? (
                                     selectedItems.map((item: SelectedItem) => {
-                                        // For now, we don't have stock levels in the product object from DB.
-                                        // We'll leave it as N/A or implement a stock fetch if needed later.
+                                        const available = stockByProduct[item.productId] ?? 0
+                                        const overdrawn = item.quantity > available
                                         return (
                                             <TableRow key={item.id}>
                                                 <TableCell className="font-medium">
@@ -344,11 +377,11 @@ export default function AddLoadout() {
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="text-right text-muted-foreground">
-                                                    N/A
+                                                <TableCell className={`text-right font-mono ${overdrawn ? "text-red-600 font-bold" : "text-muted-foreground"}`}>
+                                                    {available.toLocaleString()}
                                                 </TableCell>
-                                                <TableCell className="text-right font-bold">
-                                                    {item.quantity}
+                                                <TableCell className={`text-right font-bold ${overdrawn ? "text-red-600" : ""}`}>
+                                                    {item.quantity.toLocaleString()}
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <Button

@@ -28,6 +28,7 @@ import {
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb, dayFilter } from "@/lib/pocketbase"
 import { generateOrderNumber } from "@/lib/orderNumber"
+import { fetchPostedEmptiesByProduct } from "@/lib/fieldSales"
 import { useAuth } from "@/context/AuthContext"
 
 import { toast } from "sonner"
@@ -68,6 +69,9 @@ export default function VSEMovementForm({
     // sold/returned that day). Drives the restricted dropdown.
     const [allowedProductIds, setAllowedProductIds] = useState<string[]>([])
     const [remainingByProduct, setRemainingByProduct] = useState<Record<string, number>>({})
+    // Returns-only cap: outstanding unsold per product (given minus sold
+    // minus product-returns, i.e. posted field-sale empties backed out).
+    const [returnCapByProduct, setReturnCapByProduct] = useState<Record<string, number>>({})
     const [vseList, setVseList] = useState<{ id: string, name: string }[]>([])
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
@@ -137,6 +141,7 @@ export default function VSEMovementForm({
         if (!selectedVse || !date) {
             setAllowedProductIds([])
             setRemainingByProduct({})
+            setReturnCapByProduct({})
             return
         }
         let cancelled = false
@@ -197,11 +202,35 @@ export default function VSEMovementForm({
                 setAllowedProductIds(allowed)
                 setRemainingByProduct(remaining)
 
-                // 3. Remainder per product; drop fully-accounted lines
+                // Returns cap: posted field-sale empties live inside the
+                // `returned` tallies but aren't unsold products, so back
+                // them out — otherwise the outstanding unsold balance
+                // vanishes the moment a field sale is approved.
+                let returnCap: Record<string, number> = { ...remaining }
+                if (!isVseSale) {
+                    const postedEmpties = await fetchPostedEmptiesByProduct(selectedVse, date)
+                    if (cancelled) return
+                    returnCap = {}
+                    for (const pid of allowed) {
+                        returnCap[pid] = Math.max(
+                            0,
+                            givenByProduct[pid] -
+                                (accountedByProduct[pid] || 0) +
+                                (postedEmpties[pid] || 0)
+                        )
+                    }
+                }
+                setReturnCapByProduct(returnCap)
+
+                // 3. Prefill per product; drop fully-accounted lines. The
+                // returns form prefills outstanding unsold (balance after
+                // approved field sales); the sales form prefills the raw
+                // remainder.
+                const capForPrefill = isVseSale ? remaining : returnCap
                 const prefilled: SelectedItem[] = Object.entries(givenByProduct)
-                    .map(([productId, given]) => ({
+                    .map(([productId]) => ({
                         productId,
-                        quantity: given - (accountedByProduct[productId] || 0),
+                        quantity: capForPrefill[productId] ?? 0,
                     }))
                     .filter((r) => r.quantity > 0 && metaByProduct[r.productId])
                     .map((r) => ({
@@ -232,7 +261,7 @@ export default function VSEMovementForm({
         return () => {
             cancelled = true
         }
-    }, [selectedVse, date])
+    }, [selectedVse, date, isVseSale])
 
     const handleItemsChange = (items: SelectedItem[]) => {
         setSelectedItems(items)
@@ -318,6 +347,7 @@ export default function VSEMovementForm({
                 setSelectedItems([])
                 setAllowedProductIds([])
                 setRemainingByProduct({})
+                setReturnCapByProduct({})
                 setDate(undefined)
                 return
             }
@@ -327,11 +357,11 @@ export default function VSEMovementForm({
             // restock warehouse_stock (created if missing) with an
             // inventory_logs audit entry each.
             const overReturned = selectedItems.find(
-                (item) => item.quantity > (remainingByProduct[item.productId] ?? 0)
+                (item) => item.quantity > (returnCapByProduct[item.productId] ?? 0)
             )
             if (overReturned) {
-                const remaining = remainingByProduct[overReturned.productId] ?? 0
-                toast.error(`Only ${remaining} × ${overReturned.productName} outstanding from this loadout`)
+                const cap = returnCapByProduct[overReturned.productId] ?? 0
+                toast.error(`Only ${cap} × ${overReturned.productName} outstanding from this loadout`)
                 setSaving(false)
                 return
             }
@@ -396,6 +426,7 @@ export default function VSEMovementForm({
             setSelectedItems([])
             setAllowedProductIds([])
             setRemainingByProduct({})
+            setReturnCapByProduct({})
             setDate(undefined)
         } catch (error) {
             console.error('Error recording VSE movement:', error)
@@ -408,17 +439,21 @@ export default function VSEMovementForm({
     // Dropdown scope: only products given to the selected VSE on the
     // selected date (both sales and returns). Before a VSE + date is
     // picked there is nothing to scope to, so show the full catalog.
+    // Hints and caps follow the outstanding figure for the active form:
+    // raw remainder for sales, outstanding unsold (posted field-sale
+    // empties backed out) for returns.
     const scopeActive = !!selectedVse && !!date
     const allowedIdSet = new Set(allowedProductIds)
+    const limitByProduct = isVseSale ? remainingByProduct : returnCapByProduct
     const pickerProducts = scopeActive
         ? products.filter((p) => allowedIdSet.has(p.id))
         : products
     const pickerItemState = scopeActive
         ? (product: Product) => {
-            const remaining = remainingByProduct[product.id] ?? 0
-            return remaining <= 0
+            const limit = limitByProduct[product.id] ?? 0
+            return limit <= 0
                 ? { disabled: true, hint: 'Sold out' }
-                : { disabled: false, hint: `${remaining} left` }
+                : { disabled: false, hint: `${limit} left` }
         }
         : undefined
     const saleTotalAmount = isVseSale
@@ -606,7 +641,7 @@ export default function VSEMovementForm({
                                                 <Input
                                                     type="number"
                                                     min={0}
-                                                    max={scopeActive ? Math.max(0, remainingByProduct[item.productId] ?? 0) : undefined}
+                                                    max={scopeActive ? Math.max(0, limitByProduct[item.productId] ?? 0) : undefined}
                                                     value={item.quantity}
                                                     onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
                                                     disabled={saving || prefilling}

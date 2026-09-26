@@ -58,6 +58,9 @@ export async function getFullListInBatches(
             const inner = chunk.map((id) => `${field} = "${id}"`).join(" || ");
             const { filter, ...rest } = options ?? {};
             return pb.collection(collection).getFullList({
+                // Chunks are intentionally parallel same-collection requests;
+                // the SDK would otherwise autocancel them as duplicates.
+                $autoCancel: false,
                 ...rest,
                 filter: filter ? `(${filter}) && (${inner})` : inner,
             } as any);

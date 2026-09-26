@@ -29,7 +29,8 @@ import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import {
     approveFieldSaleDimension,
     rejectFieldSaleDimension,
-    tryValidateAndPost,
+    tryPostSaleSide,
+    tryPostEmptiesSide,
     type FieldSaleDimension,
     type FieldSaleStatus,
 } from "@/lib/fieldSales"
@@ -44,6 +45,8 @@ interface QueueRow {
     sale_status: FieldSaleStatus
     empties_status: FieldSaleStatus
     posted_to_summary: boolean
+    sale_posted: boolean
+    empties_posted: boolean
     total: number
     itemCount: number
 }
@@ -117,6 +120,8 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                     sale_status: h.sale_status,
                     empties_status: h.empties_status,
                     posted_to_summary: !!h.posted_to_summary,
+                    sale_posted: !!h.sale_posted,
+                    empties_posted: !!h.empties_posted,
                     total: totals[h.id] || 0,
                     itemCount: counts[h.id] || 0,
                 }))
@@ -140,8 +145,9 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
         if (!actionId) return
         setActionLoading(true)
         try {
-            const validated = await approveFieldSaleDimension(actionId, dimension, reviewer)
-            toast.success(validated ? "Approved — validated and posted to Loadout Summary" : "Approved")
+            const posted = await approveFieldSaleDimension(actionId, dimension, reviewer)
+            const side = dimension === "sale" ? "Sale posted to Loadout Summary" : "Empties posted to Loadout Summary"
+            toast.success(posted ? side : "Approved")
             setConfirmOpen(false)
             setActionId(null)
             await fetchQueue()
@@ -153,17 +159,20 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
         }
     }
 
-    // Recovery for records approved on both sides before posting succeeded
-    // (e.g. a posting failure left them approved but unposted).
-    const handleRetryPost = async (saleId: string) => {
+    // Recovery for records whose approval succeeded but posting did not
+    // (e.g. a posting failure left them approved but unposted). Posts
+    // whichever approved-but-unposted side(s) remain on this record.
+    const handleRetryPost = async (saleId: string, retryDimension: FieldSaleDimension) => {
         setActionId(saleId)
         setActionLoading(true)
         try {
-            const validated = await tryValidateAndPost(saleId)
-            if (validated) {
+            const posted = retryDimension === "sale"
+                ? await tryPostSaleSide(saleId)
+                : await tryPostEmptiesSide(saleId)
+            if (posted) {
                 toast.success("Posted to Loadout Summary")
             } else {
-                toast.info("Not fully approved yet — nothing posted")
+                toast.info("Not approved yet — nothing posted")
             }
             await fetchQueue()
         } catch (error: any) {
@@ -298,49 +307,54 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                             <TableCell>{statusBadge(mine)}</TableCell>
                                             <TableCell>{statusBadge(other)}</TableCell>
                                             <TableCell className="text-right">
-                                                {mine === "pending" ? (
-                                                    <div className="flex justify-end gap-2">
-                                                        <Button
-                                                            size="sm"
-                                                            className="bg-green-700 hover:bg-green-800"
-                                                            onClick={() => {
-                                                                setActionId(row.id)
-                                                                setConfirmOpen(true)
-                                                            }}
-                                                        >
-                                                            <Check className="h-4 w-4 mr-1" /> Approve
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="destructive"
-                                                            onClick={() => {
-                                                                setActionId(row.id)
-                                                                setRejectReason("")
-                                                                setRejectOpen(true)
-                                                            }}
-                                                        >
-                                                            <X className="h-4 w-4 mr-1" /> Reject
-                                                        </Button>
-                                                    </div>
-                                                ) : row.sale_status === "approved" &&
-                                                  row.empties_status === "approved" &&
-                                                  !row.posted_to_summary ? (
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        onClick={() => handleRetryPost(row.id)}
-                                                        disabled={actionLoading}
-                                                    >
-                                                        {actionLoading ? (
-                                                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                                                        ) : (
-                                                            <RotateCcw className="h-4 w-4 mr-1" />
-                                                        )}
-                                                        Retry posting
-                                                    </Button>
-                                                ) : (
-                                                    <span className="text-xs text-muted-foreground">—</span>
-                                                )}
+                                                {(() => {
+                                                    const minePosted = dimension === "sale" ? row.sale_posted : row.empties_posted
+                                                    if (mine === "pending") {
+                                                        return (
+                                                            <div className="flex justify-end gap-2">
+                                                                <Button
+                                                                    size="sm"
+                                                                    className="bg-green-700 hover:bg-green-800"
+                                                                    onClick={() => {
+                                                                        setActionId(row.id)
+                                                                        setConfirmOpen(true)
+                                                                    }}
+                                                                >
+                                                                    <Check className="h-4 w-4 mr-1" /> Approve
+                                                                </Button>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="destructive"
+                                                                    onClick={() => {
+                                                                        setActionId(row.id)
+                                                                        setRejectReason("")
+                                                                        setRejectOpen(true)
+                                                                    }}
+                                                                >
+                                                                    <X className="h-4 w-4 mr-1" /> Reject
+                                                                </Button>
+                                                            </div>
+                                                        )
+                                                    }
+                                                    if (mine === "approved" && !minePosted) {
+                                                        return (
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={() => handleRetryPost(row.id, dimension)}
+                                                                disabled={actionLoading}
+                                                            >
+                                                                {actionLoading ? (
+                                                                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                                                ) : (
+                                                                    <RotateCcw className="h-4 w-4 mr-1" />
+                                                                )}
+                                                                Retry posting
+                                                            </Button>
+                                                        )
+                                                    }
+                                                    return <span className="text-xs text-muted-foreground">—</span>
+                                                })()}
                                             </TableCell>
                                         </TableRow>,
                                     ]
@@ -372,7 +386,7 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                 open={confirmOpen}
                 onOpenChange={setConfirmOpen}
                 title={`Approve ${dimension === "sale" ? "sale" : "empties"}?`}
-                description="This records your approval. The sale is validated once both checks are approved."
+                description={`This records your approval and posts the ${dimension === "sale" ? "sale" : "empties"} to the Loadout Summary right away — no waiting on the other check.`}
                 confirmLabel="Approve"
                 loading={actionLoading}
                 onConfirm={handleApprove}

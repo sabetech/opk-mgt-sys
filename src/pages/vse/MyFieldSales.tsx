@@ -25,6 +25,8 @@ interface FieldSaleRow {
     sale_reject_reason: string
     empties_reject_reason: string
     posted_to_summary: boolean
+    sale_posted: boolean
+    empties_posted: boolean
     total: number
     itemCount: number
 }
@@ -60,6 +62,8 @@ export default function MyFieldSales() {
         vseCustomerId: string
         vseCustomerName: string
         items: FieldSaleInitialItem[]
+        salePosted: boolean
+        emptiesPosted: boolean
     } | null>(null)
 
     const userId = user?.id || ""
@@ -106,6 +110,8 @@ export default function MyFieldSales() {
                     sale_reject_reason: h.sale_reject_reason || "",
                     empties_reject_reason: h.empties_reject_reason || "",
                     posted_to_summary: !!h.posted_to_summary,
+                    sale_posted: !!h.sale_posted,
+                    empties_posted: !!h.empties_posted,
                     total: totals[h.id] || 0,
                     itemCount: counts[h.id] || 0,
                 }))
@@ -145,6 +151,8 @@ export default function MyFieldSales() {
                 empties: row.empties_received,
                 vseCustomerId: vseId,
                 vseCustomerName: vseCustomer?.name || 'Your route',
+                salePosted: row.sale_posted,
+                emptiesPosted: row.empties_posted,
                 items: items.map((it) => ({
                     id: crypto.randomUUID(),
                     productId: it.product_id,
@@ -165,19 +173,23 @@ export default function MyFieldSales() {
         return (
             <div className="space-y-4">
                 <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Edit Field Sale</h2>
-                    <p className="text-sm text-muted-foreground">
-                        Fix and resubmit — both approvals restart.
-                    </p>
-                </div>
-                <FieldSaleForm
-                    vseCustomerId={editing.vseCustomerId}
-                    vseCustomerName={editing.vseCustomerName}
-                    saleId={editing.saleId}
-                    initialDate={editing.date}
-                    initialItems={editing.items}
-                    initialEmpties={editing.empties}
-                    submitLabel="Update & Resubmit"
+                        <h2 className="text-2xl font-bold tracking-tight">Edit Field Sale</h2>
+                        <p className="text-sm text-muted-foreground">
+                            {editing.salePosted || editing.emptiesPosted
+                                ? "Only the not-yet-counted side can be changed — the counted side stays as approved."
+                                : "Fix and resubmit — rejected checks restart."}
+                        </p>
+                    </div>
+                    <FieldSaleForm
+                        vseCustomerId={editing.vseCustomerId}
+                        vseCustomerName={editing.vseCustomerName}
+                        saleId={editing.saleId}
+                        initialDate={editing.date}
+                        initialItems={editing.items}
+                        initialEmpties={editing.empties}
+                        salePosted={editing.salePosted}
+                        emptiesPosted={editing.emptiesPosted}
+                        submitLabel="Update & Resubmit"
                     onSaved={() => {
                         setEditing(null)
                         fetchSales(date)
@@ -275,7 +287,7 @@ export default function MyFieldSales() {
                                     {expanded.has(row.id) ? <ChevronUp className="h-4 w-4 mr-1" /> : <ChevronDown className="h-4 w-4 mr-1" />}
                                     Items
                                 </Button>
-                                {!row.posted_to_summary && (
+                                {!row.empties_posted && (
                                     <Button
                                         variant="outline"
                                         size="sm"

@@ -25,6 +25,9 @@ dist-ssr
 .env
 .opencode
 .env.secrets
+.env.e2e
+test-results/
+playwright-report/
 factory-reset.js
 empties-solution-article.md
 customers-empties-balance.csv
