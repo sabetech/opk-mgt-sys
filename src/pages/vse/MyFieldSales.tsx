@@ -261,6 +261,9 @@ export default function MyFieldSales() {
                                 {row.posted_to_summary && (
                                     <Badge variant="secondary" className="text-[11px]">Counted</Badge>
                                 )}
+                                {row.sale_status === "approved" && !row.sale_posted && !row.posted_to_summary && (
+                                    <Badge variant="outline" className="text-[11px] bg-blue-50 text-blue-800 border-blue-200">With cashier</Badge>
+                                )}
                             </div>
                             {row.sale_status === "rejected" && row.sale_reject_reason && (
                                 <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded p-2">

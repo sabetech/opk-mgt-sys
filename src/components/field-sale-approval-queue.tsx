@@ -47,6 +47,7 @@ interface QueueRow {
     posted_to_summary: boolean
     sale_posted: boolean
     empties_posted: boolean
+    orderId: string | null
     total: number
     itemCount: number
 }
@@ -80,7 +81,6 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
     const [rejectReason, setRejectReason] = useState("")
 
     const dimField = dimension === "sale" ? "sale_status" : "empties_status"
-    const otherField = dimension === "sale" ? "empties_status" : "sale_status"
 
     const fetchQueue = async () => {
         setLoading(true)
@@ -122,6 +122,7 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                     posted_to_summary: !!h.posted_to_summary,
                     sale_posted: !!h.sale_posted,
                     empties_posted: !!h.empties_posted,
+                    orderId: typeof h.order_id === 'string' ? h.order_id : h.order_id?.id || null,
                     total: totals[h.id] || 0,
                     itemCount: counts[h.id] || 0,
                 }))
@@ -146,7 +147,9 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
         setActionLoading(true)
         try {
             const posted = await approveFieldSaleDimension(actionId, dimension, reviewer)
-            const side = dimension === "sale" ? "Sale posted to Loadout Summary" : "Empties posted to Loadout Summary"
+            const side = dimension === "sale"
+                ? "Sale approved — added to the VSE pending order for the cashier"
+                : "Empties posted to Loadout Summary"
             toast.success(posted ? side : "Approved")
             setConfirmOpen(false)
             setActionId(null)
@@ -254,14 +257,13 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                 <TableHead className="text-right">Total</TableHead>
                                 <TableHead className="text-right">Empties</TableHead>
                                 <TableHead>{dimension === "sale" ? "Sale" : "Empties"}</TableHead>
-                                <TableHead>Other Check</TableHead>
                                 <TableHead className="text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-32 text-center">
+                                    <TableCell colSpan={7} className="h-32 text-center">
                                         <div className="flex items-center justify-center gap-2 text-muted-foreground">
                                             <Loader2 className="h-6 w-6 animate-spin" />
                                             <span className="text-sm">Loading queue...</span>
@@ -270,14 +272,13 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                 </TableRow>
                             ) : rows.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="h-24 text-center text-muted-foreground italic">
+                                    <TableCell colSpan={7} className="h-24 text-center text-muted-foreground italic">
                                         Nothing here.
                                     </TableCell>
                                 </TableRow>
                             ) : (
                                 rows.flatMap((row) => {
                                     const mine = row[dimField] as FieldSaleStatus
-                                    const other = row[otherField] as FieldSaleStatus
                                     const out = [
                                         <TableRow key={row.id} className="hover:bg-muted/50">
                                             <TableCell>
@@ -299,13 +300,13 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                                 <div className="text-xs text-muted-foreground">
                                                     {formatRowDate(row.date)}
                                                     {row.posted_to_summary ? " · Counted" : ""}
+                                                    {dimension === "sale" && row.sale_status === "approved" && !row.sale_posted ? " · In pending order" : ""}
                                                 </div>
                                             </TableCell>
                                             <TableCell className="font-medium">{row.vseName}</TableCell>
                                             <TableCell className="text-right font-bold">GH₵ {row.total.toFixed(2)}</TableCell>
                                             <TableCell className="text-right">{row.empties_received}</TableCell>
                                             <TableCell>{statusBadge(mine)}</TableCell>
-                                            <TableCell>{statusBadge(other)}</TableCell>
                                             <TableCell className="text-right">
                                                 {(() => {
                                                     const minePosted = dimension === "sale" ? row.sale_posted : row.empties_posted
@@ -361,7 +362,7 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                                     if (expanded.has(row.id)) {
                                         out.push(
                                             <TableRow key={`${row.id}-detail`}>
-                                                <TableCell colSpan={8} className="bg-muted/30">
+                                                <TableCell colSpan={7} className="bg-muted/30">
                                                     <div className="rounded-md border bg-background divide-y text-sm max-w-2xl">
                                                         {(details[row.id] || []).map((d, idx) => (
                                                             <div key={idx} className="flex justify-between px-3 py-2">
@@ -386,7 +387,9 @@ export default function FieldSaleApprovalQueue({ dimension, title, description }
                 open={confirmOpen}
                 onOpenChange={setConfirmOpen}
                 title={`Approve ${dimension === "sale" ? "sale" : "empties"}?`}
-                description={`This records your approval and posts the ${dimension === "sale" ? "sale" : "empties"} to the Loadout Summary right away — no waiting on the other check.`}
+                description={dimension === "sale"
+                    ? "This adds the sale to the VSE's pending order for the day — the cashier collects the cash and approves it in Orders. Empties still post to the Loadout Summary on their own check."
+                    : "This records your approval and posts the empties to the Loadout Summary right away — no waiting on the other check."}
                 confirmLabel="Approve"
                 loading={actionLoading}
                 onConfirm={handleApprove}

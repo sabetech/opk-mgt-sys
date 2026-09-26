@@ -27,9 +27,7 @@ import {
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb, dayFilter } from "@/lib/pocketbase"
-import { generateOrderNumber } from "@/lib/orderNumber"
-import { fetchPostedEmptiesByProduct } from "@/lib/fieldSales"
-import { useAuth } from "@/context/AuthContext"
+import { appendManualLinesToDayOrder, fetchPostedEmptiesByProduct } from "@/lib/fieldSales"
 
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -58,7 +56,6 @@ export default function VSEMovementForm({
     const [vseOpen, setVseOpen] = useState(false)
     const [selectedVse, setSelectedVse] = useState<string>("")
     const [selectedItems, setSelectedItems] = useState<SelectedItem[]>([])
-    const { profile } = useAuth()
     const isVseSale = movementType === "sold"
 
     // DB State
@@ -292,10 +289,11 @@ export default function VSEMovementForm({
         try {
             const dateStr = date.toISOString().split('T')[0]
 
-            // VSE sales go to the orders table for approval (order type
-            // "vse"). vse_movements are written on approval only, so the
-            // Loadout Summary is not double-counted. Stock already left the
-            // warehouse via the loadout, so approval skips warehouse
+            // VSE sales merge into the single pending day order for this VSE
+            // (shared with approved field sales) so the cashier collects one
+            // total. vse_movements are written on cashier approval only, so
+            // the Loadout Summary is not double-counted. Stock already left
+            // the warehouse via the loadout, so approval skips warehouse
             // fulfillment entirely.
             if (isVseSale) {
                 const overSold = selectedItems.find(
@@ -308,39 +306,20 @@ export default function VSEMovementForm({
                     return
                 }
 
-                const totalAmount = selectedItems.reduce(
-                    (sum, item) => sum + item.quantity * (priceByProduct[item.productId] ?? 0),
-                    0
-                )
-
-                const orderType = await pb.collection('order_types').getFirstListItem('name = "vse"', { fields: 'id' })
-                const orderNumber = await generateOrderNumber()
                 const vseName = vseList.find((v) => v.id === selectedVse)?.name || 'VSE'
 
-                const order = await pb.collection('orders').create({
-                    customer_id: selectedVse,
-                    order_number: orderNumber,
-                    total_amount: totalAmount,
-                    payment_type: 'cash',
-                    order_type_id: orderType.id,
-                    status: 'pending',
-                    date_time: date.toISOString(),
-                    created_by: profile?.id || '',
-                })
-
-                for (const item of selectedItems) {
-                    const unitPrice = priceByProduct[item.productId] ?? 0
-                    await pb.collection('sales').create({
-                        order_id: order.id,
-                        product_id: item.productId,
+                const orderId = await appendManualLinesToDayOrder(
+                    selectedVse,
+                    dateStr,
+                    selectedItems.map((item) => ({
+                        productId: item.productId,
                         quantity: item.quantity,
-                        unit_price: unitPrice,
-                        sub_total: item.quantity * unitPrice,
-                        discount: 0,
-                    })
-                }
+                        unitPrice: priceByProduct[item.productId] ?? 0,
+                    }))
+                )
+                const dayOrder = await pb.collection('orders').getOne(orderId, { fields: 'id, order_number' })
 
-                toast.success(`Order #${orderNumber} created for ${vseName} and is pending approval.`)
+                toast.success(`Added to Order #${dayOrder.order_number} for ${vseName} — pending approval.`)
 
                 // Reset form
                 setSelectedVse("")

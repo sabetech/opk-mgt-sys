@@ -448,6 +448,10 @@ async function main() {
         fld('number', 'unit_price', { required: true }),
         fld('number', 'sub_total', { required: true }),
         fld('date', 'deleted_at'),
+        // Line origin on VSE day orders: 'field' (auto-aggregated from
+        // approved field sales, rebuilt on every approval) vs 'manual'
+        // (staff-recorded via Record VSE Sales, preserved across rebuilds).
+        fld('text', 'source'),
     ], {}, flags.force);
 
     await ensureCollection('warehouse_orders', 'base', [
@@ -495,7 +499,7 @@ async function main() {
         fld('text', 'reason'),
     ], {}, flags.force);
 
-    const { users } = await getCollectionsMap();
+    const { users, orders: ordersForFieldSales } = await getCollectionsMap();
 
     // VSE field sales (recorded in the field by VSE logins, dual approval).
     // sale_status is approved by account_manager, empties_status by
@@ -513,7 +517,11 @@ async function main() {
         fld('relation', 'vse_customer_id', { collectionId: customers.id, required: true, maxSelect: 1 }),
         fld('relation', 'created_by', { collectionId: users.id, required: true, maxSelect: 1 }),
         fld('text', 'reference', { required: true, unique: true }),
-        fld('number', 'empties_received', { required: true }),
+        // Optional (not required): 0 is a legitimate value (e.g.
+        // non-returnable-only sales) and PocketBase rejects numeric 0 on
+        // required number fields ("Cannot be blank"). Presence/>=0 is
+        // enforced client-side in field-sale-form.tsx + fieldSales.ts.
+        fld('number', 'empties_received'),
         fld('select', 'sale_status', { required: true, values: ['pending', 'approved', 'rejected'] }),
         fld('text', 'sale_reviewed_by'),
         fld('date', 'sale_reviewed_at'),
@@ -525,6 +533,10 @@ async function main() {
         fld('bool', 'posted_to_summary'),
         fld('bool', 'sale_posted'),
         fld('bool', 'empties_posted'),
+        // Aggregated pending `orders` row (type `vse`) this sale feeds once
+        // its sale side is approved. Cashier collects cash against the order
+        // and `vse_movements` are written on order approval only.
+        fld('relation', 'order_id', { collectionId: ordersForFieldSales.id, maxSelect: 1 }),
     ], {
         listRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || ${VSE_OWNER}`,
         viewRule: `${ADMIN_RULE} || @request.auth.role = "account_manager" || @request.auth.role = "empties_manager" || ${VSE_OWNER}`,
@@ -880,12 +892,21 @@ async function main() {
     // Per-dimension posted flags on vse_field_sales (sale_posted /
     // empties_posted) for independent sale/empties posting. Backfills from
     // posted_to_summary so already-counted rows post neither side again.
+    // Also links each sale to its aggregated pending `orders` row
+    // (`order_id`) once the sale side is approved.
     const fieldSalesCol = (await pb.collections.getFullList()).find((c) => c.name === 'vse_field_sales');
     if (fieldSalesCol) {
         const existingFieldNames = fieldSalesCol.fields.map((f) => f.name);
         const missingFlags = ['sale_posted', 'empties_posted'].filter((n) => !existingFieldNames.includes(n));
-        if (missingFlags.length > 0) {
-            const additions = missingFlags.map((n) => fld('bool', n));
+        const additions = missingFlags.map((n) => fld('bool', n));
+        if (!existingFieldNames.includes('order_id')) {
+            const { orders: ordersColForLink } = await getCollectionsMap();
+            if (ordersColForLink) {
+                additions.push(fld('relation', 'order_id', { collectionId: ordersColForLink.id, maxSelect: 1 }));
+                missingFlags.push('order_id');
+            }
+        }
+        if (additions.length > 0) {
             if (!flags.dryRun) {
                 await pb.collections.update(fieldSalesCol.id, {
                     fields: [...fieldSalesCol.fields, ...additions]
@@ -913,6 +934,38 @@ async function main() {
             console.log(`  [ok] backfilled posted flags on ${backfilled}/${counted.length} counted field sale(s)`);
         } else {
             console.log('  [dry-run] would backfill posted flags from posted_to_summary');
+        }
+        // `empties_received` must accept 0 (non-returnable-only sales):
+        // PocketBase rejects numeric 0 on required number fields
+        // ("Cannot be blank"), so unset required on existing DBs.
+        // Re-fetch: the additions update above may have changed the fields.
+        const freshFieldSalesCol = (await pb.collections.getFullList()).find((c) => c.name === 'vse_field_sales');
+        const emptiesField = freshFieldSalesCol.fields.find((f) => f.name === 'empties_received');
+        if (emptiesField && emptiesField.required) {
+            const relaxedFields = freshFieldSalesCol.fields.map((f) =>
+                f.name === 'empties_received' ? { ...f, required: false } : f
+            );
+            if (!flags.dryRun) {
+                await pb.collections.update(freshFieldSalesCol.id, { fields: relaxedFields });
+                console.log('  [ok] made empties_received optional on vse_field_sales');
+            } else {
+                console.log('  [dry-run] would make empties_received optional on vse_field_sales');
+            }
+        }
+    }
+
+    // Line-origin tag on sales rows (`source`: 'field' | 'manual') so the
+    // VSE day-order rebuild can refresh field-aggregated lines without
+    // wiping staff-recorded manual lines on the same order.
+    const salesCol = (await pb.collections.getFullList()).find((c) => c.name === 'sales');
+    if (salesCol && !salesCol.fields.some((f) => f.name === 'source')) {
+        if (!flags.dryRun) {
+            await pb.collections.update(salesCol.id, {
+                fields: [...salesCol.fields, fld('text', 'source')],
+            });
+            console.log('  [ok] added source to sales');
+        } else {
+            console.log('  [dry-run] would add source to sales');
         }
     }
 

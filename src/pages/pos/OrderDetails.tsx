@@ -44,6 +44,7 @@ import {
 import { toast } from "sonner"
 import { format, isSameDay } from "date-fns"
 import { useAuth } from "@/context/AuthContext"
+import { markFieldSalesCashierPosted } from "@/lib/fieldSales"
 
 interface OrderDetail {
     id: string
@@ -105,6 +106,7 @@ export default function OrderDetails() {
     const [returnReason, setReturnReason] = useState("")
     const [existingReturns, setExistingReturns] = useState<ReturnRecord[]>([])
     const [returning, setReturning] = useState(false)
+    const [saleSources, setSaleSources] = useState<{ reference: string; total: number }[]>([])
 
     useEffect(() => {
         const fetchOrderDetails = async () => {
@@ -145,6 +147,38 @@ export default function OrderDetails() {
                     reason: r.reason || '',
                     date: r.date,
                 })))
+
+                // VSE aggregated orders: which approved field sales feed this
+                // order (grouped-by-product source refs for the cashier).
+                if (orderData.expand?.order_type_id?.name === 'vse') {
+                    try {
+                        const linked: any[] = await pb.collection('vse_field_sales').getFullList({
+                            filter: `order_id = "${id}"`,
+                            fields: 'id, reference',
+                        })
+                        if (linked.length > 0) {
+                            const linkedItems: any[] = await pb.collection('vse_field_sale_items').getFullList({
+                                filter: linked.map((l) => `sale_id = "${l.id}"`).join(' || '),
+                                fields: 'sale_id, sub_total, quantity, unit_price',
+                            })
+                            const totalsBySale: Record<string, number> = {}
+                            for (const it of linkedItems) {
+                                totalsBySale[it.sale_id] = (totalsBySale[it.sale_id] || 0)
+                                    + (it.sub_total ?? (it.quantity || 0) * (it.unit_price || 0))
+                            }
+                            setSaleSources(linked.map((l) => ({
+                                reference: l.reference || l.id.slice(0, 8),
+                                total: totalsBySale[l.id] || 0,
+                            })))
+                        } else {
+                            setSaleSources([])
+                        }
+                    } catch {
+                        setSaleSources([])
+                    }
+                } else {
+                    setSaleSources([])
+                }
 
             } catch (err) {
                 console.error("Error fetching order details:", err)
@@ -192,6 +226,12 @@ export default function OrderDetails() {
                         quantity: item.quantity,
                         movement_type: 'sold',
                     })
+                }
+
+                // Finalize linked field sales (sale_posted + posted_to_summary
+                // where empties already in). No-op for manual VSE orders.
+                try { await markFieldSalesCashierPosted(order.id) } catch (err) {
+                    console.warn("Failed to finalize linked field sales:", err)
                 }
 
                 toast.success("VSE sale approved and recorded!")
@@ -467,6 +507,11 @@ export default function OrderDetails() {
                                 <Package className="h-5 w-5 text-muted-foreground" />
                                 Order Items
                             </CardTitle>
+                            {saleSources.length > 0 && (
+                                <p className="text-xs text-muted-foreground pt-1">
+                                    Aggregated from field sales: {saleSources.map((s) => `${s.reference} (GH₵ ${s.total.toFixed(2)})`).join(" · ")}
+                                </p>
+                            )}
                         </CardHeader>
                         <CardContent>
                             <Table>
@@ -643,7 +688,7 @@ export default function OrderDetails() {
 
                     <div className="bg-muted/30 p-4 rounded-lg border border-dashed text-xs text-muted-foreground italic">
                         {isVseOrderView
-                            ? 'VSE sale: once approved, the sale is recorded against the VSE loadout. No warehouse order is created and main stock is untouched (it left via the loadout).'
+                            ? 'VSE aggregated sale: quantities combine every approved field sale for this VSE and day. Approving collects the cash total and records the sale against the VSE loadout. No warehouse order is created and main stock is untouched (it left via the loadout).'
                             : 'Once approved, the order status changes to "approved" and the payment amount is permanently recorded.'}
                     </div>
 
