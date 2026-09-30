@@ -14,6 +14,11 @@ export const getStockLevel = (quantity: number, lowMax = 20, mediumMax = 50): St
   return 'low'
 }
 
+/** Category grouping key: the shared code_name label (blank → Uncategorized). */
+export const getProductCategory = (product: { code_name: string | null }): string => {
+  return product.code_name?.trim() || "Uncategorized"
+}
+
 export const formatPrice = (price: number | null): string => {
   return price !== null ? `GHc ${price.toFixed(2)}` : 'GHc 0.00'
 }

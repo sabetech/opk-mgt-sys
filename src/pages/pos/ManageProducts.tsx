@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
     Table,
     TableBody,
@@ -10,11 +10,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Search, Plus, Edit2, Printer } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Search, Plus, Edit2, Printer, ChevronDown } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { buildStockLevelsHtml, printReceiptHtml } from "@/lib/receipt"
 import type { Product, ProductForm } from "@/lib/productTypes"
-import { formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
+import { formatPrice, getProductCategory, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
 import { assignProductCode, displayProductCode } from "@/lib/productCode"
 import ProductDialog from "@/pages/warehouse/ProductDialog"
 import { toast } from "sonner"
@@ -25,6 +27,8 @@ export default function ManageProducts() {
     const [products, setProducts] = useState<Product[]>([])
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
+    const [selectedCategories, setSelectedCategories] = useState<string[]>([])
+    const [minQty, setMinQty] = useState("")
     const [currentPage, setCurrentPage] = useState(1)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -81,10 +85,29 @@ export default function ManageProducts() {
 
     const filteredProducts = products.filter(product => {
         const term = searchTerm.toLowerCase()
-        return product.sku_name.toLowerCase().includes(term) ||
+        const matchesSearch = product.sku_name.toLowerCase().includes(term) ||
             (product.code_name && product.code_name.toLowerCase().includes(term)) ||
             (product.product_code && product.product_code.toLowerCase().includes(term))
+        const matchesCategory = selectedCategories.length === 0 ||
+            selectedCategories.includes(getProductCategory(product))
+        const min = minQty === "" ? null : parseFloat(minQty)
+        const matchesQty = min === null || isNaN(min) || product.quantity >= min
+        return matchesSearch && matchesCategory && matchesQty
     })
+
+    const categories = useMemo(() => {
+        const set = new Set<string>()
+        for (const p of products) set.add(getProductCategory(p))
+        return [...set].sort((a, b) => a.localeCompare(b))
+    }, [products])
+
+    const toggleCategory = (category: string) => {
+        setSelectedCategories(prev =>
+            prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
+        )
+    }
+
+    const isFiltered = selectedCategories.length > 0 || (minQty !== "" && !isNaN(parseFloat(minQty)))
 
     const totalItems = filteredProducts.length
     const totalPages = Math.ceil(totalItems / ITEMS_PER_PAGE)
@@ -170,17 +193,22 @@ export default function ManageProducts() {
 
     useEffect(() => {
         setCurrentPage(1)
-    }, [searchTerm])
+    }, [searchTerm, selectedCategories, minQty])
 
     const handlePrint = () => {
-        const rows = products.map((product) => ({
+        const rows = filteredProducts.map((product) => ({
             skuCode: displayProductCode(product),
             productName: product.sku_name,
             quantity: product.quantity,
             retailPrice: product.retail_price,
-            category: product.code_name?.trim() || "Uncategorized",
+            category: getProductCategory(product),
         }))
-        printReceiptHtml(buildStockLevelsHtml(rows), "Current Stock Levels")
+        const scope = selectedCategories.length === 1
+            ? ` — ${selectedCategories[0]}`
+            : selectedCategories.length > 1
+                ? ` — ${selectedCategories.length} categories`
+                : ""
+        printReceiptHtml(buildStockLevelsHtml(rows), `Current Stock Levels${scope}`)
     }
 
     if (loading) {
@@ -199,9 +227,13 @@ export default function ManageProducts() {
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-3xl font-bold tracking-tight">Manage Products</h2>
                 <div className="flex items-center gap-2">
-                    <Button variant="outline" onClick={handlePrint} disabled={loading || products.length === 0} className="gap-2">
+                    <Button variant="outline" onClick={handlePrint} disabled={loading || filteredProducts.length === 0} className="gap-2">
                         <Printer className="h-4 w-4" />
-                        Print Stock Levels
+                        {selectedCategories.length === 1
+                            ? `Print ${selectedCategories[0]}`
+                            : selectedCategories.length > 1
+                                ? `Print ${selectedCategories.length} Categories`
+                                : "Print Stock Levels"}
                     </Button>
                     <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
                         <Plus className="h-4 w-4" />
@@ -210,15 +242,77 @@ export default function ManageProducts() {
                 </div>
             </div>
 
-            <div className="relative w-full md:w-72">
-                <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                    type="search"
-                    placeholder="Search products..."
-                    className="pl-8"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                />
+            <div className="flex flex-col gap-4 md:flex-row md:items-center">
+                <div className="relative w-full md:w-72">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        type="search"
+                        placeholder="Search products..."
+                        className="pl-8"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                </div>
+
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button variant="outline" className="w-full md:w-auto justify-between gap-2">
+                            {selectedCategories.length === 0
+                                ? "All categories"
+                                : `${selectedCategories.length} categor${selectedCategories.length === 1 ? "y" : "ies"}`}
+                            <ChevronDown className="h-4 w-4 opacity-50" />
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-64 p-2" align="start">
+                        <div className="max-h-64 overflow-y-auto">
+                            {categories.length > 0 ? (
+                                categories.map((category) => (
+                                    <label
+                                        key={category}
+                                        className="flex items-center gap-3 px-2 py-2 hover:bg-muted/50 cursor-pointer rounded"
+                                    >
+                                        <Checkbox
+                                            checked={selectedCategories.includes(category)}
+                                            onCheckedChange={() => toggleCategory(category)}
+                                        />
+                                        <span className="text-sm font-medium">{category}</span>
+                                    </label>
+                                ))
+                            ) : (
+                                <p className="px-2 py-4 text-sm text-muted-foreground text-center">No categories found.</p>
+                            )}
+                        </div>
+                        {selectedCategories.length > 0 && (
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="w-full mt-1"
+                                onClick={() => setSelectedCategories([])}
+                            >
+                                Clear selection
+                            </Button>
+                        )}
+                    </PopoverContent>
+                </Popover>
+
+                <div className="flex items-center gap-2">
+                    <label htmlFor="min-qty" className="text-sm font-medium whitespace-nowrap">Qty &gt;=</label>
+                    <Input
+                        id="min-qty"
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        className="w-24"
+                        value={minQty}
+                        onChange={(e) => setMinQty(e.target.value)}
+                    />
+                </div>
+
+                {isFiltered && (
+                    <p className="text-xs text-muted-foreground md:ml-auto">
+                        Showing {filteredProducts.length} of {products.length} products
+                    </p>
+                )}
             </div>
 
             <div className="rounded-md border bg-white dark:bg-card">

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
     Table,
     TableBody,
@@ -10,11 +10,14 @@ import {
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Trash2, Search, Plus, Edit2 } from "lucide-react"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Trash2, Search, Plus, Edit2, Printer, ChevronDown } from "lucide-react"
 import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { useAuth } from "@/context/AuthContext"
 import type { Product, ProductForm } from "@/lib/productTypes"
-import { formatPrice, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
+import { formatPrice, getProductCategory, getStockLevel, getStockBadgeVariant, getStockBadgeText } from "@/lib/productUtils"
+import { buildStockLevelsHtml, printReceiptHtml } from "@/lib/receipt"
 import { assignProductCode, displayProductCode } from "@/lib/productCode"
 import ProductDialog from "./ProductDialog"
 import { toast } from "sonner"
@@ -27,6 +30,7 @@ export default function Products() {
     const [loading, setLoading] = useState(true)
     const [searchTerm, setSearchTerm] = useState("")
     const [filterReturnable, setFilterReturnable] = useState<"all" | "returnable" | "non-returnable">("all")
+    const [selectedCategories, setSelectedCategories] = useState<string[]>([])
     const [currentPage, setCurrentPage] = useState(1)
     const [isDialogOpen, setIsDialogOpen] = useState(false)
     const [editingProduct, setEditingProduct] = useState<Product | null>(null)
@@ -86,8 +90,38 @@ export default function Products() {
         const matchesFilter = filterReturnable === "all" ||
             (filterReturnable === "returnable" && product.returnable) ||
             (filterReturnable === "non-returnable" && !product.returnable)
-        return matchesSearch && matchesFilter
+        const matchesCategory = selectedCategories.length === 0 ||
+            selectedCategories.includes(getProductCategory(product))
+        return matchesSearch && matchesFilter && matchesCategory
     })
+
+    const categories = useMemo(() => {
+        const set = new Set<string>()
+        for (const p of products) set.add(getProductCategory(p))
+        return [...set].sort((a, b) => a.localeCompare(b))
+    }, [products])
+
+    const toggleCategory = (category: string) => {
+        setSelectedCategories(prev =>
+            prev.includes(category) ? prev.filter(c => c !== category) : [...prev, category]
+        )
+    }
+
+    const handlePrint = () => {
+        const rows = filteredProducts.map((product) => ({
+            skuCode: displayProductCode(product),
+            productName: product.sku_name,
+            quantity: product.quantity,
+            retailPrice: product.retail_price,
+            category: getProductCategory(product),
+        }))
+        const scope = selectedCategories.length === 1
+            ? ` — ${selectedCategories[0]}`
+            : selectedCategories.length > 1
+                ? ` — ${selectedCategories.length} categories`
+                : ""
+        printReceiptHtml(buildStockLevelsHtml(rows), `Current Stock Levels${scope}`)
+    }
 
     // Pagination
     const totalItems = filteredProducts.length
@@ -190,7 +224,7 @@ export default function Products() {
     // Reset pagination when filters change
     useEffect(() => {
         setCurrentPage(1)
-    }, [searchTerm, filterReturnable])
+    }, [searchTerm, filterReturnable, selectedCategories])
 
     if (loading) {
         return (
@@ -210,12 +244,22 @@ export default function Products() {
             {/* Header */}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="text-3xl font-bold tracking-tight">Products</h2>
-                {profile?.role !== 'auditor' && (
-                    <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
-                        <Plus className="h-4 w-4" />
-                        Add Product
+                <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={handlePrint} disabled={loading || filteredProducts.length === 0} className="gap-2">
+                        <Printer className="h-4 w-4" />
+                        {selectedCategories.length === 1
+                            ? `Print ${selectedCategories[0]}`
+                            : selectedCategories.length > 1
+                                ? `Print ${selectedCategories.length} Categories`
+                                : "Print Stock Levels"}
                     </Button>
-                )}
+                    {profile?.role !== 'auditor' && (
+                        <Button onClick={handleAddProduct} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                            <Plus className="h-4 w-4" />
+                            Add Product
+                        </Button>
+                    )}
+                </div>
             </div>
 
             {/* Search and Filters */}
@@ -233,7 +277,47 @@ export default function Products() {
                 </div>
 
                 {/* Filter Buttons */}
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                    <Popover>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="justify-between gap-2">
+                                {selectedCategories.length === 0
+                                    ? "All categories"
+                                    : `${selectedCategories.length} categor${selectedCategories.length === 1 ? "y" : "ies"}`}
+                                <ChevronDown className="h-4 w-4 opacity-50" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-64 p-2" align="start">
+                            <div className="max-h-64 overflow-y-auto">
+                                {categories.length > 0 ? (
+                                    categories.map((category) => (
+                                        <label
+                                            key={category}
+                                            className="flex items-center gap-3 px-2 py-2 hover:bg-muted/50 cursor-pointer rounded"
+                                        >
+                                            <Checkbox
+                                                checked={selectedCategories.includes(category)}
+                                                onCheckedChange={() => toggleCategory(category)}
+                                            />
+                                            <span className="text-sm font-medium">{category}</span>
+                                        </label>
+                                    ))
+                                ) : (
+                                    <p className="px-2 py-4 text-sm text-muted-foreground text-center">No categories found.</p>
+                                )}
+                            </div>
+                            {selectedCategories.length > 0 && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="w-full mt-1"
+                                    onClick={() => setSelectedCategories([])}
+                                >
+                                    Clear selection
+                                </Button>
+                            )}
+                        </PopoverContent>
+                    </Popover>
                     <Button
                         variant={filterReturnable === "all" ? "default" : "outline"}
                         size="sm"
