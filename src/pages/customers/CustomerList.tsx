@@ -32,6 +32,7 @@ import { fetchCustomerBalances } from "@/lib/customerBalance"
 import { fetchEmptiesDisplayMode, formatEmptiesBalance, type EmptiesDisplayMode } from "@/lib/emptiesDisplay"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
+import ConfirmDialog from "@/components/ConfirmDialog"
 import CustomerHistorySheet from "./CustomerHistorySheet"
 
 interface Customer {
@@ -78,6 +79,11 @@ export default function CustomerList() {
     // History Sheet State
     const [isHistoryOpen, setIsHistoryOpen] = useState(false)
     const [historyCustomer, setHistoryCustomer] = useState<Customer | null>(null)
+
+    // Soft-delete State (deleted_at stamp; balance + empties ledger untouched
+    // so the customer can be restored later with history intact)
+    const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null)
+    const [deleting, setDeleting] = useState(false)
 
     // Fetch Customers
     const fetchCustomers = async () => {
@@ -177,6 +183,29 @@ export default function CustomerList() {
             toast.error("Failed to update customer.")
         } finally {
             setSaving(false)
+        }
+    }
+
+    const handleConfirmDelete = async () => {
+        if (!deleteTarget) return
+        setDeleting(true)
+        try {
+            await pb.collection('customers').update(deleteTarget.id, {
+                deleted_at: new Date().toISOString(),
+            })
+            toast.success(`"${deleteTarget.name}" removed. Balance and history preserved for restore.`)
+            setDeleteTarget(null)
+            setCustomers(prev => prev.filter(c => c.id !== deleteTarget.id))
+            setLiveBalances(prev => {
+                const next = { ...prev }
+                delete next[deleteTarget.id]
+                return next
+            })
+        } catch (err) {
+            console.error("Error deleting customer:", err)
+            toast.error("Failed to delete customer.")
+        } finally {
+            setDeleting(false)
         }
     }
 
@@ -297,7 +326,12 @@ export default function CustomerList() {
                                                     <Edit className="h-4 w-4" />
                                                     <span className="sr-only">Edit</span>
                                                 </Button>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                    onClick={() => setDeleteTarget(customer)}
+                                                >
                                                     <Trash2 className="h-4 w-4" />
                                                     <span className="sr-only">Delete</span>
                                                 </Button>
@@ -322,6 +356,18 @@ export default function CustomerList() {
                 customer={historyCustomer}
                 open={isHistoryOpen}
                 onOpenChange={setIsHistoryOpen}
+            />
+
+            {/* Soft-delete confirmation (empties balance + history preserved) */}
+            <ConfirmDialog
+                open={deleteTarget !== null}
+                onOpenChange={(open) => { if (!open) setDeleteTarget(null) }}
+                title={`Delete "${deleteTarget?.name ?? ""}"?`}
+                description="The customer will be hidden from all lists and pickers, but their crates balance, empties history, and orders are preserved and can be restored later."
+                confirmLabel="Delete"
+                variant="destructive"
+                loading={deleting}
+                onConfirm={handleConfirmDelete}
             />
 
             {/* Edit Customer Dialog */}
