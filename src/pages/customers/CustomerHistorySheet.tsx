@@ -14,11 +14,14 @@ import {
     ChevronRight,
     TrendingDown,
     TrendingUp,
-    Calendar
+    Calendar,
+    Package,
+    Minus
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
+import { emptiesActivityEffect } from "@/lib/customerBalance"
 import { fetchEmptiesDisplayMode, formatEmptiesBalance, type EmptiesDisplayMode } from "@/lib/emptiesDisplay"
 
 interface CustomerHistorySheetProps {
@@ -33,7 +36,7 @@ interface CustomerHistorySheetProps {
 type TimelineEntry = {
     id: string
     date: string
-    type: 'purchase' | 'return'
+    type: 'purchase' | 'return' | 'opening'
     description: string
     amount?: number
     quantity: number
@@ -134,11 +137,12 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
             // We want to show it in the timeline to show the balance impact.
             empties?.forEach(log => {
                 const isReturn = log.activity === 'customer_empties_return'
+                const isOpening = log.activity === 'opening_balance'
                 entries.push({
                     id: `empty-${log.id}`,
-                    date: log.created, // Use created for time sorting
-                    type: isReturn ? 'return' : 'purchase',
-                    description: isReturn ? 'Empties Return' : `Empties for Sale`,
+                    date: log.created || log.date, // Use created for time sorting
+                    type: isOpening ? 'opening' : isReturn ? 'return' : 'purchase',
+                    description: isOpening ? 'Opening Balance' : isReturn ? 'Empties Return' : `Empties for Sale`,
                     quantity: log.total_quantity,
                     details: detailsByLog[log.id] || []
                 })
@@ -159,7 +163,7 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                 opening +
                 (empties || []).reduce(
                     (sum: number, log) =>
-                        sum + (log.activity === 'customer_empties_return' ? 1 : -1) * (log.total_quantity || 0),
+                        sum + emptiesActivityEffect(log.activity) * (log.total_quantity || 0),
                     0
                 )
             )
@@ -232,9 +236,11 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                                 "h-10 w-10 rounded-full flex items-center justify-center shrink-0",
                                                 entry.type === 'purchase'
                                                     ? "bg-amber-50 text-amber-600 dark:bg-amber-900/20"
-                                                    : "bg-green-50 text-green-600 dark:bg-green-900/20"
+                                                    : entry.type === 'opening'
+                                                        ? "bg-blue-50 text-blue-600 dark:bg-blue-900/20"
+                                                        : "bg-green-50 text-green-600 dark:bg-green-900/20"
                                             )}>
-                                                {entry.type === 'purchase' ? <ShoppingCart className="h-5 w-5" /> : <RefreshCcw className="h-5 w-5" />}
+                                                {entry.type === 'purchase' ? <ShoppingCart className="h-5 w-5" /> : entry.type === 'opening' ? <Package className="h-5 w-5" /> : <RefreshCcw className="h-5 w-5" />}
                                             </div>
                                             <div>
                                                 <p className="font-bold text-sm">{entry.description}</p>
@@ -252,14 +258,16 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                                 <div className="flex items-center gap-1 justify-end">
                                                     {entry.type === 'purchase' ? (
                                                         <TrendingDown className="h-3 w-3 text-red-500" />
+                                                    ) : entry.type === 'opening' ? (
+                                                        <Minus className="h-3 w-3 text-muted-foreground" />
                                                     ) : (
                                                         <TrendingUp className="h-3 w-3 text-green-500" />
                                                     )}
                                                     <span className={cn(
                                                         "text-xs font-bold",
-                                                        entry.type === 'purchase' ? "text-red-600" : "text-green-600"
+                                                        entry.type === 'purchase' ? "text-red-600" : entry.type === 'opening' ? "text-muted-foreground" : "text-green-600"
                                                     )}>
-                                                        {entry.type === 'purchase' ? '-' : '+'}{entry.quantity} Crates
+                                                        {entry.type === 'opening' ? `${entry.quantity} Crates` : `${entry.type === 'purchase' ? '-' : '+'}${entry.quantity} Crates`}
                                                     </span>
                                                 </div>
                                             </div>

@@ -1,5 +1,4 @@
 import { getFullListInBatches } from "./pocketbase";
-
 export interface CustomerBalance {
     /** Stored opening balance (customers.balance) — set at creation/import. */
     opening: number;
@@ -7,6 +6,16 @@ export interface CustomerBalance {
     ledger: number;
     /** Live crates balance: opening + ledger. */
     balance: number;
+}
+
+/** Ledger effect of an empties_log activity on the crates balance.
+ * `opening_balance` rows are detail-only (the opening lives in
+ * customers.balance) so they score 0 — any other unknown activity is
+ * conservatively treated as a debit, matching the historic behavior. */
+export function emptiesActivityEffect(activity: string): 1 | -1 | 0 {
+    if (activity === 'customer_empties_return') return 1
+    if (activity === 'opening_balance') return 0
+    return -1
 }
 
 /**
@@ -17,6 +26,11 @@ export interface CustomerBalance {
  * (`customer_purchase` debits returnable crates, `customer_empties_return`
  * credits them back), so every display of a customer's balance must go
  * through here instead of reading the stored field directly.
+ *
+ * INVARIANT: only the two activities above move the ledger. Detail-only
+ * rows such as `opening_balance` (per-product opening breakdown written at
+ * customer creation — the opening itself lives in customers.balance) and
+ * `empties_to_supplier` are ignored, otherwise the opening would count twice.
  */
 export async function fetchCustomerBalances(
     openings: Record<string, number>

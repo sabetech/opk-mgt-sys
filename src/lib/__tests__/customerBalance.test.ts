@@ -6,7 +6,7 @@ vi.mock("@/lib/pocketbase", async (importOriginal) => {
 });
 
 import { getFullListInBatches } from "@/lib/pocketbase";
-import { fetchCustomerBalance, fetchCustomerBalances } from "../customerBalance";
+import { emptiesActivityEffect, fetchCustomerBalance, fetchCustomerBalances } from "../customerBalance";
 
 const batch = vi.mocked(getFullListInBatches);
 
@@ -37,8 +37,27 @@ describe("fetchCustomerBalances (ledger: opening + returns - purchases)", () => 
     expect(r.c1).toEqual({ opening: 3, ledger: 6, balance: 9 });
   });
 
+  it("opening_balance detail rows never move the ledger (no double count)", async () => {
+    batch.mockResolvedValue([
+      { customer_id: "c1", activity: "opening_balance", total_quantity: 12 },
+      { customer_id: "c1", activity: "customer_empties_return", total_quantity: 2 },
+    ]);
+    const r = await fetchCustomerBalances({ c1: 12 });
+    expect(r.c1).toEqual({ opening: 12, ledger: 2, balance: 14 });
+  });
+
   it("fetchCustomerBalance single wrapper falls back to opening", async () => {
     batch.mockResolvedValue([]);
     await expect(fetchCustomerBalance("c9", 7)).resolves.toBe(7);
+  });
+});
+
+describe("emptiesActivityEffect", () => {
+  it("returns credit, opening scores zero, everything else debits", () => {
+    expect(emptiesActivityEffect("customer_empties_return")).toBe(1);
+    expect(emptiesActivityEffect("opening_balance")).toBe(0);
+    expect(emptiesActivityEffect("customer_purchase")).toBe(-1);
+    expect(emptiesActivityEffect("empties_to_supplier")).toBe(-1);
+    expect(emptiesActivityEffect("something_new")).toBe(-1);
   });
 });

@@ -224,7 +224,7 @@ export default function AddCustomer() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
-                    <CustomerFormFields />
+                    <CustomerFormFields showBreakdown />
                 </CardContent>
             </Card>
         </div>
