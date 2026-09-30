@@ -36,7 +36,6 @@ import StockAdjustmentRequests from "@/pages/admin/StockAdjustmentRequests"
 import StocksComingIn from "@/pages/operations/StocksComingIn"
 import StocksComingInLog from "@/pages/operations/StocksComingInLog"
 import Adjustments from "@/pages/operations/Adjustments"
-import AdjustmentRequests from "@/pages/operations/AdjustmentRequests"
 import ReloadTruckEmpties from "@/pages/operations/ReloadTruckEmpties"
 import TruckReloadsToGGBL from "@/pages/operations/TruckReloadsToGGBL"
 import AdjustmentsLog from "@/pages/operations/AdjustmentsLog"
@@ -167,9 +166,7 @@ function App() {
                   </ProtectedRoute>
                 } />
                 <Route path="adjustment-requests" element={
-                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'warehouse_manager', 'auditor']}>
-                    <AdjustmentRequests />
-                  </ProtectedRoute>
+                  <Navigate to="/dashboard/admin/stock-adjustment-requests" replace />
                 } />
                 <Route path="adjustments-log" element={
                   <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor', 'sales_manager']}>
@@ -277,7 +274,7 @@ function App() {
               {/* Stock adjustment approvals: viewable beyond admin, but only
                   admins can approve/reject (also enforced by API rules). */}
               <Route path="admin/stock-adjustment-requests" element={
-                <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'operations_manager']}>
+                <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'operations_manager', 'warehouse_manager', 'auditor']}>
                   <StockAdjustmentRequests />
                 </ProtectedRoute>
               } />

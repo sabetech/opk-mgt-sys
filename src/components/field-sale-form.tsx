@@ -362,7 +362,7 @@ export default function FieldSaleForm({
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Product</TableHead>
-                                    <TableHead className="text-right w-[112px]">Qty</TableHead>
+                                    <TableHead className="text-right w-[140px]">Qty</TableHead>
                                     <TableHead className="text-right">Total</TableHead>
                                     <TableHead className="w-[44px]"></TableHead>
                                 </TableRow>
@@ -390,7 +390,7 @@ export default function FieldSaleForm({
                                                         value={item.quantity}
                                                         onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
                                                         disabled={saving || itemsLocked}
-                                                        className="h-14 text-right font-bold text-xl px-3"
+                                                        className="h-16 text-right font-bold text-2xl px-4"
                                                     />
                                                 </TableCell>
                                                 <TableCell className="text-right font-bold text-sm whitespace-nowrap">
