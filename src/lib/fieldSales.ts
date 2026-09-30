@@ -331,6 +331,125 @@ export async function rejectFieldSaleDimension(
     }
 }
 
+export interface EmptiesGroupInput {
+    saleId: string
+    emptiesReceived: number
+    lines: EmptiesShareLine[]
+}
+
+/** Group key for the empties approvals view: one card per VSE per day. */
+export function emptiesGroupKey(vseCustomerId: string, dateStr: string): string {
+    return `${vseCustomerId}||${String(dateStr).slice(0, 10)}`
+}
+
+/**
+ * Sums the pro-rata empties split of every sale in a VSE-day group.
+ * Pure — shared by the approvals UI and tests.
+ */
+export function aggregateGroupEmpties(sales: EmptiesGroupInput[]): Record<string, number> {
+    const result: Record<string, number> = {}
+    for (const sale of sales) {
+        const split = distributeEmptiesProRata(sale.emptiesReceived || 0, sale.lines)
+        for (const [pid, qty] of Object.entries(split)) {
+            result[pid] = (result[pid] || 0) + qty
+        }
+    }
+    return result
+}
+
+export interface BulkDimensionResult {
+    succeeded: string[]
+    failed: { id: string; error: string }[]
+}
+
+/**
+ * Bulk empties approval: approves every sale id in the VSE-day group one
+ * by one (each posts its own tally rows via the single-record path).
+ * One bad record never blocks the rest; callers report the split.
+ */
+export async function approveEmptiesGroup(saleIds: string[], reviewerName: string): Promise<BulkDimensionResult> {
+    const succeeded: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of saleIds) {
+        try {
+            await approveFieldSaleDimension(id, 'empties', reviewerName)
+            succeeded.push(id)
+        } catch (err) {
+            failed.push({ id, error: err instanceof Error ? err.message : 'Failed to approve' })
+        }
+    }
+    return { succeeded, failed }
+}
+
+/** Bulk empties rejection with one shared reason for the whole group. */
+export async function rejectEmptiesGroup(saleIds: string[], reviewerName: string, reason: string): Promise<BulkDimensionResult> {
+    if (!reason.trim()) throw new Error('A reason is required to reject')
+    const succeeded: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of saleIds) {
+        try {
+            await rejectFieldSaleDimension(id, 'empties', reviewerName, reason.trim())
+            succeeded.push(id)
+        } catch (err) {
+            failed.push({ id, error: err instanceof Error ? err.message : 'Failed to reject' })
+        }
+    }
+    return { succeeded, failed }
+}
+
+/**
+ * Bulk sale approval: approves every sale id in the VSE-day group one by
+ * one. Each approval feeds the day's aggregated pending order via
+ * upsertVseDayOrder, which rebuilds from the full approved set every time
+ * — so sequential approvals converge and one bad record never blocks the
+ * rest; callers report the split.
+ */
+export async function approveSaleGroup(saleIds: string[], reviewerName: string): Promise<BulkDimensionResult> {
+    const succeeded: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of saleIds) {
+        try {
+            await approveFieldSaleDimension(id, 'sale', reviewerName)
+            succeeded.push(id)
+        } catch (err) {
+            failed.push({ id, error: err instanceof Error ? err.message : 'Failed to approve' })
+        }
+    }
+    return { succeeded, failed }
+}
+
+/** Bulk sale rejection with one shared reason for the whole group. */
+export async function rejectSaleGroup(saleIds: string[], reviewerName: string, reason: string): Promise<BulkDimensionResult> {
+    if (!reason.trim()) throw new Error('A reason is required to reject')
+    const succeeded: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of saleIds) {
+        try {
+            await rejectFieldSaleDimension(id, 'sale', reviewerName, reason.trim())
+            succeeded.push(id)
+        } catch (err) {
+            failed.push({ id, error: err instanceof Error ? err.message : 'Failed to reject' })
+        }
+    }
+    return { succeeded, failed }
+}
+
+/** Re-posts every approved-but-unposted sale in the group (recovery path). */
+export async function retryPostEmptiesGroup(saleIds: string[]): Promise<BulkDimensionResult> {
+    const succeeded: string[] = []
+    const failed: { id: string; error: string }[] = []
+    for (const id of saleIds) {
+        try {
+            const posted = await tryPostEmptiesSide(id)
+            if (posted) succeeded.push(id)
+            else failed.push({ id, error: 'Not approved yet — nothing posted' })
+        } catch (err) {
+            failed.push({ id, error: err instanceof Error ? err.message : 'Posting failed' })
+        }
+    }
+    return { succeeded, failed }
+}
+
 export interface EmptiesShareLine {
     productId: string
     quantity: number

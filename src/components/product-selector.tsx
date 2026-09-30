@@ -189,6 +189,7 @@ export function ProductSelector({
                         value={quantity}
                         onChange={(e) => setQuantity(e.target.value)}
                         disabled={disabled}
+                        className="h-14 text-xl font-bold"
                     />
                 </div>
 
@@ -196,6 +197,7 @@ export function ProductSelector({
                     type="button" 
                     onClick={handleAddItem} 
                     disabled={!selectedProduct || disabled}
+                    className="h-14 text-base"
                 >
                     <Plus className="mr-2 h-4 w-4" /> Add Item
                 </Button>

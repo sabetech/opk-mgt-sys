@@ -38,6 +38,23 @@ describe("buildSaleReceiptHtml (SALE-01 receipt)", () => {
   it("omits deposit block when zero", () => {
     expect(buildSaleReceiptHtml({ ...sale, crateDepositQty: 0 })).not.toContain("Crate deposit");
   });
+
+  it("shows per-unit discount note and savings total, net unit price", () => {
+    const discounted: CompletedSale = {
+      ...sale,
+      items: [
+        { productName: "Star", skuCode: "ST-001", quantity: 2, price: 50, surcharge: 0, discount: 2, total: 96 },
+      ],
+      grandTotal: 96,
+      crateDepositQty: 0,
+    };
+    const html = buildSaleReceiptHtml(discounted);
+    expect(html).toContain("incl. GHc");
+    expect(html).toContain("discount");
+    expect(html).toContain("Wholesale discount");
+    expect(html).toContain("48.00");
+    expect(html).toContain("96.00");
+  });
 });
 
 describe("proforma (SALE-02 quote-only)", () => {
@@ -59,6 +76,24 @@ describe("proforma (SALE-02 quote-only)", () => {
     });
     expect(html).toContain("QUOTE ONLY");
     expect(html).toContain("PF-20260919-AB12");
+  });
+
+  it("proforma shows discount note and savings row", () => {
+    const html = buildProformaHtml({
+      reference: "PF-20260919-AB12",
+      dateTime: new Date(),
+      customerName: "Ama",
+      paymentType: "cash",
+      items: [
+        { productName: "Star", skuCode: "ST-001", quantity: 3, price: 50, surcharge: 0, discount: 2, total: 144 },
+      ],
+      totalQuantity: 3,
+      subtotal: 144,
+      grandTotal: 144,
+    });
+    expect(html).toContain("discount");
+    expect(html).toContain("Wholesale discount");
+    expect(html).toContain("48.00");
   });
 });
 

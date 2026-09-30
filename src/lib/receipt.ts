@@ -2,11 +2,13 @@ export interface ReceiptItem {
     productName: string
     skuCode: string
     quantity: number
-    /** Base unit price (before surcharge) */
+    /** Base unit price (before surcharge/discount) */
     price: number
     /** Per-unit surcharge applied (0 when none) */
     surcharge: number
-    /** Line total (quantity * (price + surcharge)) */
+    /** Per-unit wholesale discount applied (0 when none; never combined with surcharge) */
+    discount?: number
+    /** Line total (quantity * (price + surcharge - discount)) */
     total: number
 }
 
@@ -49,13 +51,17 @@ function formatDateTime(date: Date): string {
  * receipt printers (e.g. TM-T20/TM-T88 series roll paper).
  */
 export function buildSaleReceiptHtml(sale: CompletedSale): string {
+    const discountTotal = sale.items.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0)
     const itemRows = sale.items
         .map((item, index) => {
-            const unitPrice = item.price + item.surcharge
+            const discount = item.discount || 0
+            const unitPrice = item.price + item.surcharge - discount
             const surchargeNote =
                 item.surcharge > 0
                     ? `<div class="muted">incl. GHc ${formatMoney(item.surcharge)} surcharge</div>`
-                    : ""
+                    : discount > 0
+                        ? `<div class="muted">incl. GHc ${formatMoney(discount)} discount</div>`
+                        : ""
             return `<tr>
                 <td class="item">${index + 1}. ${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.skuCode)}</div>${surchargeNote}</td>
             </tr>
@@ -107,6 +113,7 @@ ${sale.servedBy ? `<div class="meta"><span>Served by:</span><span>${escapeHtml(s
 <table><tbody>${itemRows}</tbody></table>
 <div class="divider"></div>
 <div class="totals"><span>Total Qty:</span><span>${sale.totalQuantity}</span></div>
+${discountTotal > 0 ? `<div class="totals"><span>Wholesale discount:</span><span>− GHc ${formatMoney(discountTotal)}</span></div>` : ""}
 ${(sale.crateDepositQty ?? 0) > 0 ? `<div class="totals"><span>Crate deposit (${sale.crateDepositQty} x ${formatMoney(sale.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(sale.crateDepositTotal ?? 0)}</span></div><div class="muted center">Refundable in cash when empties are returned</div>` : ""}
 <div class="totals grand"><span>TOTAL:</span><span>GHc ${formatMoney(sale.grandTotal)}</span></div>
 <div class="divider"></div>
@@ -144,13 +151,17 @@ export function generateProformaReference(date = new Date()): string {
  * nothing, changes no stock, and must never be confused with a sale).
  */
 export function buildProformaHtml(proforma: ProformaInvoice): string {
+    const discountTotal = proforma.items.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0)
     const itemRows = proforma.items
         .map((item, index) => {
-            const unitPrice = item.price + item.surcharge
+            const discount = item.discount || 0
+            const unitPrice = item.price + item.surcharge - discount
             const surchargeNote =
                 item.surcharge > 0
                     ? `<div class="muted">incl. GHc ${formatMoney(item.surcharge)} surcharge</div>`
-                    : ""
+                    : discount > 0
+                        ? `<div class="muted">incl. GHc ${formatMoney(discount)} discount</div>`
+                        : ""
             return `<tr>
                 <td class="center">${index + 1}</td>
                 <td>${escapeHtml(item.productName)}<div class="muted">${escapeHtml(item.skuCode)}</div>${surchargeNote}</td>
@@ -202,6 +213,7 @@ ${proforma.servedBy ? `<div><span>Served by:</span><span>${escapeHtml(proforma.s
 <div class="totals">
 <div><span>Total Qty:</span><span>${proforma.totalQuantity}</span></div>
 <div><span>Subtotal:</span><span>GHc ${formatMoney(proforma.subtotal)}</span></div>
+${discountTotal > 0 ? `<div><span>Wholesale discount:</span><span>− GHc ${formatMoney(discountTotal)}</span></div>` : ""}
 ${(proforma.crateDepositQty ?? 0) > 0 ? `<div><span>Crate deposit (${proforma.crateDepositQty} x ${formatMoney(proforma.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(proforma.crateDepositTotal ?? 0)}</span></div>` : ""}
 <div class="grand"><span>TOTAL:</span><span>GHc ${formatMoney(proforma.grandTotal)}</span></div>
 </div>

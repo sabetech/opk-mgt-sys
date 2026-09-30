@@ -12,9 +12,15 @@ import { pb } from "@/lib/pocketbase";
 import * as pocketbaseModule from "@/lib/pocketbase";
 import {
   aggregateFieldSaleItems,
+  aggregateGroupEmpties,
   appendManualLinesToDayOrder,
+  approveEmptiesGroup,
+  approveSaleGroup,
   createFieldSale,
+  emptiesGroupKey,
   generateFieldSaleReference,
+  rejectEmptiesGroup,
+  rejectSaleGroup,
   upsertVseDayOrder,
 } from "../fieldSales";
 
@@ -201,5 +207,140 @@ describe("largest-remainder pro-rata (APPR-01 empties distribution)", () => {
 
   it("zero returnable qty drops empties (documents silent-drop edge)", () => {
     expect(distribute(7, [0, 0])).toEqual([0, 0]);
+  });
+});
+
+describe("empties group aggregation (VSE empties approvals)", () => {
+  it("group key is VSE + day slice", () => {
+    expect(emptiesGroupKey("v1", "2026-09-30T12:00:00.000Z")).toBe("v1||2026-09-30");
+    expect(emptiesGroupKey("v1", "2026-09-30")).toBe("v1||2026-09-30");
+  });
+
+  it("sums per-sale pro-rata splits by product", () => {
+    const out = aggregateGroupEmpties([
+      {
+        saleId: "s1",
+        emptiesReceived: 5,
+        lines: [
+          { productId: "p1", quantity: 3, returnable: true },
+          { productId: "p2", quantity: 2, returnable: true },
+        ],
+      },
+      {
+        saleId: "s2",
+        emptiesReceived: 4,
+        lines: [{ productId: "p1", quantity: 2, returnable: true }],
+      },
+    ]);
+    // s1: 5 across 3:2 -> p1=3, p2=2; s2: 4 all to p1
+    expect(out).toEqual({ p1: 7, p2: 2 });
+  });
+
+  it("ignores non-returnable lines and zero totals", () => {
+    const out = aggregateGroupEmpties([
+      {
+        saleId: "s1",
+        emptiesReceived: 3,
+        lines: [{ productId: "p1", quantity: 2, returnable: false }],
+      },
+      { saleId: "s2", emptiesReceived: 0, lines: [{ productId: "p2", quantity: 2, returnable: true }] },
+    ]);
+    expect(out).toEqual({});
+  });
+});
+
+describe("bulk group approve/reject (VSE approvals one-button)", () => {
+  function mockBulkBackend(opts: { failIds?: string[] } = {}) {
+    const fail = new Set(opts.failIds ?? []);
+    const createdMovements: unknown[] = [];
+    collection.mockImplementation(((name: string) => {
+      switch (name) {
+        case "order_types":
+          return { getFirstListItem: async () => ({ id: "ot-vse" }) };
+        case "vse_field_sales":
+          return {
+            getOne: async (id: string) => {
+              if (fail.has(id)) throw new Error("boom");
+              return {
+                id,
+                sale_status: "pending",
+                empties_status: "pending",
+                sale_posted: false,
+                empties_posted: false,
+                date: "2026-09-30",
+                vse_customer_id: "v1",
+                empties_received: 2,
+              };
+            },
+            getFullList: async (q?: { filter?: string }) =>
+              String(q?.filter || "").includes('sale_status = "approved"') ? [] : [],
+            update: async () => ({}),
+          };
+        case "vse_field_sale_items":
+          return {
+            getFullList: async () => [
+              { sale_id: "s1", product_id: "p1", quantity: 1, unit_price: 10, sub_total: 10 },
+            ],
+          };
+        case "vse_movements":
+          return { create: async (body: unknown) => { createdMovements.push(body); return {}; } };
+        case "orders":
+          return {
+            getFullList: async () => [],
+            create: async (body: unknown) => ({ id: "order-new", ...(body as object) }),
+            update: async () => ({}),
+          };
+        case "sales":
+          return { getFullList: async () => [], create: async () => ({}), delete: async () => ({}) };
+        default:
+          return { getFullList: async () => [] };
+      }
+    }) as never);
+    batchesMock.mockImplementation(async (collectionName: string) => {
+      if (collectionName === "vse_field_sale_items")
+        return [{ sale_id: "s1", product_id: "p1", quantity: 1, unit_price: 10, sub_total: 10 }];
+      return [];
+    });
+    return { createdMovements };
+  }
+
+  it("approveEmptiesGroup posts every record, one bad record never blocks the rest", async () => {
+    setRole("admin");
+    mockBulkBackend({ failIds: ["bad"] });
+    const result = await approveEmptiesGroup(["s1", "bad"], "mgr");
+    expect(result.succeeded).toEqual(["s1"]);
+    expect(result.failed).toHaveLength(1);
+    expect(result.failed[0]).toMatchObject({ id: "bad" });
+  });
+
+  it("rejectEmptiesGroup requires a reason, then rejects each record", async () => {
+    setRole("admin");
+    mockBulkBackend();
+    await expect(rejectEmptiesGroup(["s1"], "mgr", "  ")).rejects.toThrow(/reason/i);
+    const result = await rejectEmptiesGroup(["s1"], "mgr", "miscounted");
+    expect(result).toEqual({ succeeded: ["s1"], failed: [] });
+  });
+
+  it("approveSaleGroup feeds each sale into the day order", async () => {
+    setRole("admin");
+    mockBulkBackend({ failIds: ["bad"] });
+    const result = await approveSaleGroup(["s1", "bad"], "mgr");
+    expect(result.succeeded).toEqual(["s1"]);
+    expect(result.failed).toHaveLength(1);
+  });
+
+  it("rejectSaleGroup requires a reason, then rejects each record", async () => {
+    setRole("admin");
+    mockBulkBackend();
+    await expect(rejectSaleGroup(["s1"], "mgr", "")).rejects.toThrow(/reason/i);
+    const result = await rejectSaleGroup(["s1"], "mgr", "wrong price");
+    expect(result).toEqual({ succeeded: ["s1"], failed: [] });
+  });
+
+  it("bulk helpers touch nothing for an empty group", async () => {
+    setRole("admin");
+    mockBulkBackend();
+    await expect(approveEmptiesGroup([], "mgr")).resolves.toEqual({ succeeded: [], failed: [] });
+    await expect(approveSaleGroup([], "mgr")).resolves.toEqual({ succeeded: [], failed: [] });
   });
 });

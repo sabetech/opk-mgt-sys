@@ -25,7 +25,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 
 import { toast } from "sonner"
 import { Loader2 } from "lucide-react"
@@ -152,54 +152,73 @@ export default function AddLoadout() {
                 status: 'pending'
             })
             if (!loadout) throw new Error('Failed to create loadout header')
+            const loadoutId = loadout.id
 
-            // 2. Create Loadout Items
-            for (const item of selectedItems) {
-                await pb.collection('loadout_items').create({
-                    loadout_id: loadout.id,
-                    product_id: item.productId,
-                    quantity: item.quantity
-                })
-            }
+            // 2. Create Loadout Items — one parallel wave. $autoCancel:false
+            // is required: the SDK aborts parallel same-method+URL requests
+            // as duplicates, so only the last create would survive without it.
+            await Promise.all(
+                selectedItems.map((item) =>
+                    pb.collection('loadout_items').create({
+                        loadout_id: loadoutId,
+                        product_id: item.productId,
+                        quantity: item.quantity
+                    }, { $autoCancel: false })
+                )
+            )
 
             // 3. Approve now that items exist
-            await pb.collection('loadouts').update(loadout.id, { status: 'approved' })
+            await pb.collection('loadouts').update(loadoutId, { status: 'approved' })
 
             // 4. Deduct stock + audit log per line (replaces the old
-            // loadout server hook)
-            const failures: string[] = []
-            for (const item of selectedItems) {
-                try {
-                    const stock = await pb.collection('warehouse_stock')
-                        .getFirstListItem(`product_id = "${item.productId}"`, { fields: 'id, quantity' })
-                        .catch((err) => {
-                            if (err?.status === 404) return null
-                            throw err
-                        })
+            // loadout server hook). Stock rows are fetched in ONE bulk read
+            // (was N sequential getFirstListItem calls); the per-line stock
+            // write + log create then fire as one parallel wave with
+            // per-line failure reporting preserved via allSettled.
+            const stockRows = await getFullListInBatches(
+                'warehouse_stock',
+                'product_id',
+                selectedItems.map((item) => item.productId),
+                { fields: 'id, product_id, quantity' }
+            )
+            const stockById = new Map<string, { id: string; quantity: number }>()
+            for (const row of stockRows) {
+                if (row.product_id && !stockById.has(row.product_id)) {
+                    stockById.set(row.product_id, { id: row.id, quantity: row.quantity || 0 })
+                }
+            }
+            const outcomes = await Promise.allSettled(
+                selectedItems.map(async (item) => {
+                    const stock = stockById.get(item.productId) ?? null
                     if (stock) {
                         await pb.collection('warehouse_stock').update(stock.id, {
-                            quantity: (stock.quantity || 0) - item.quantity,
-                        })
+                            quantity: stock.quantity - item.quantity,
+                        }, { $autoCancel: false })
                     } else {
                         await pb.collection('warehouse_stock').create({
                             product_id: item.productId,
                             quantity: -item.quantity,
-                        })
+                        }, { $autoCancel: false })
                     }
                     await pb.collection('inventory_logs').create({
                         date: dateStr,
                         product_id: item.productId,
                         type: 'vse_loadout',
                         quantity: -item.quantity,
-                        reference_id: loadout.id,
+                        reference_id: loadoutId,
                         reference_table: 'loadouts',
                         description: `VSE Loadout - ${vseName}`,
-                    })
-                } catch (err) {
-                    console.error(`Failed to deduct stock for loadout item ${item.productName}:`, err)
+                    }, { $autoCancel: false })
+                })
+            )
+            const failures: string[] = []
+            outcomes.forEach((outcome, index) => {
+                if (outcome.status === 'rejected') {
+                    const item = selectedItems[index]
+                    console.error(`Failed to deduct stock for loadout item ${item.productName}:`, outcome.reason)
                     failures.push(item.productName)
                 }
-            }
+            })
 
             if (failures.length > 0) {
                 toast.warning(`Loadout approved, but stock update needs review: ${failures.join(', ')}`)

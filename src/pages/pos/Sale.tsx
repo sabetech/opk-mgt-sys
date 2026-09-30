@@ -83,6 +83,8 @@ interface CartItem {
     quantity: number
     price: number
     surcharge: number
+    /** Per-unit wholesale discount applied (0 when none; never combined with surcharge) */
+    discount: number
     total: number
 }
 
@@ -111,6 +113,10 @@ export default function Sale() {
     // Wholesale surcharge
     const [surchargeConfig, setSurchargeConfig] = useState<{ amount: number; product_ids: string[] }>({ amount: 0, product_ids: [] })
     const [applySurcharge, setApplySurcharge] = useState(false)
+
+    // Wholesale discount (fixed per-unit reduction, eligible wholesalers × eligible products)
+    const [discountConfig, setDiscountConfig] = useState<{ amount: number; product_ids: string[]; customer_ids: string[] }>({ amount: 0, product_ids: [], customer_ids: [] })
+    const [applyDiscount, setApplyDiscount] = useState(false)
 
     // Refundable crate deposit (per crate, covers empties shortfall only)
     const [depositConfig, setDepositConfig] = useState<{ amount: number }>({ amount: 200 })
@@ -204,6 +210,20 @@ export default function Sale() {
                     console.error("Failed to load surcharge settings:", err)
                 }
 
+                // Fetch wholesale discount settings (defaults to 0 = disabled)
+                try {
+                    const discountRecord = await pb.collection('app_settings').getFirstListItem('key = "wholesale_discount"')
+                    const raw = discountRecord.value
+                    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+                    setDiscountConfig({
+                        amount: typeof parsed?.amount === 'number' ? parsed.amount : 0,
+                        product_ids: Array.isArray(parsed?.product_ids) ? parsed.product_ids : [],
+                        customer_ids: Array.isArray(parsed?.customer_ids) ? parsed.customer_ids : [],
+                    })
+                } catch (err) {
+                    console.error("Failed to load discount settings:", err)
+                }
+
                 // Fetch crate deposit settings (defaults to 200 GHc/crate)
                 try {
                     const depositRecord = await pb.collection('app_settings').getFirstListItem('key = "crate_deposit"')
@@ -221,9 +241,10 @@ export default function Sale() {
         fetchInitialData()
     }, [])
 
-    // Reset surcharge when product or customer changes
+    // Reset surcharge/discount when product or customer changes
     useEffect(() => {
         setApplySurcharge(false)
+        setApplyDiscount(false)
     }, [selectedProduct, selectedCustomer])
 
     const getUnitPrice = (product: Product) => {
@@ -233,15 +254,26 @@ export default function Sale() {
             : product.retail_price || 0
     }
 
-    // Check if wholesale surcharge applies to current selection
+    // Check if wholesale surcharge / discount applies to current selection.
+    // Discount needs BOTH filters (eligible customer AND eligible product) and
+    // wins over surcharge: a line gets one or the other, never both.
     const isWholesaler = selectedCustomer?.customer_types?.name === "Wholesaler"
+    const isDiscountApplicable = isWholesaler &&
+        !!selectedCustomer &&
+        discountConfig.customer_ids.includes(selectedCustomer.id) &&
+        discountConfig.product_ids.includes(selectedProduct?.id || "") &&
+        discountConfig.amount > 0
     const isSurchargeApplicable = isWholesaler &&
+        !isDiscountApplicable &&
         surchargeConfig.product_ids.includes(selectedProduct?.id || "") &&
         surchargeConfig.amount > 0
 
     const currentUnitPrice = selectedProduct ? getUnitPrice(selectedProduct) : 0
     const currentSurcharge = (applySurcharge && isSurchargeApplicable) ? surchargeConfig.amount : 0
-    const currentTotalPrice = (currentUnitPrice + currentSurcharge) * quantity
+    const currentDiscount = (applyDiscount && isDiscountApplicable)
+        ? Math.min(discountConfig.amount, currentUnitPrice)
+        : 0
+    const currentTotalPrice = (currentUnitPrice + currentSurcharge - currentDiscount) * quantity
 
     const handleAddToCart = () => {
         if (!selectedProduct || quantity <= 0) return
@@ -257,7 +289,7 @@ export default function Sale() {
                     ? {
                         ...item,
                         quantity: item.quantity + quantity,
-                        total: (item.quantity + quantity) * (item.price + item.surcharge)
+                        total: (item.quantity + quantity) * (item.price + item.surcharge - (item.discount || 0))
                     }
                     : item
             ))
@@ -270,15 +302,17 @@ export default function Sale() {
                 quantity: quantity,
                 price: currentUnitPrice,
                 surcharge: currentSurcharge,
+                discount: currentDiscount,
                 total: currentTotalPrice
             }
             setCart([...cart, newItem])
         }
 
-        // Reset product selection and surcharge
+        // Reset product selection, surcharge and discount
         setSelectedProduct(null)
         setQuantity(1)
         setApplySurcharge(false)
+        setApplyDiscount(false)
         setProductSearchQuery("")
     }
 
@@ -288,6 +322,7 @@ export default function Sale() {
 
     const totalQuantity = cart.reduce((sum, item) => sum + item.quantity, 0)
     const cartSubtotal = cart.reduce((sum, item) => sum + item.total, 0)
+    const cartDiscountTotal = cart.reduce((sum, item) => sum + (item.discount || 0) * item.quantity, 0)
 
     // Calculate required empties for the cart
     const itemsInCart = cart.map(item => ({
@@ -357,6 +392,7 @@ export default function Sale() {
                 quantity: item.quantity,
                 price: item.price,
                 surcharge: item.surcharge,
+                discount: item.discount || 0,
                 total: item.total,
             })),
             totalQuantity,
@@ -381,6 +417,7 @@ export default function Sale() {
         setCart([])
         setSelectedCustomer(null)
         setApplyDeposit(true)
+        setApplyDiscount(false)
         setApplySurcharge(false)
         window.setTimeout(() => printReceiptHtml(html, title), 100)
     }
@@ -480,14 +517,15 @@ export default function Sale() {
                 }
             }
 
-            // Insert into sales (order items)
+            // Insert into sales (order items; discount stores the per-line
+            // wholesale discount total so history survives Settings changes)
             const salesToInsert = cart.map(item => ({
                 order_id: orderData.id,
                 product_id: item.productId,
                 quantity: item.quantity,
                 unit_price: item.price,
                 sub_total: item.total,
-                discount: 0
+                discount: (item.discount || 0) * item.quantity
             }))
 
             for (const sale of salesToInsert) {
@@ -508,6 +546,7 @@ export default function Sale() {
                     quantity: item.quantity,
                     price: item.price,
                     surcharge: item.surcharge,
+                    discount: item.discount || 0,
                     total: item.total,
                 })),
                 totalQuantity,
@@ -520,6 +559,8 @@ export default function Sale() {
             setCart([])
             setSelectedCustomer(null)
             setApplyDeposit(true)
+            setApplyDiscount(false)
+            setApplySurcharge(false)
         } catch (error: any) {
             console.error("Error processing sale:", error)
             toast.error(error.message || "Failed to process sale.")
@@ -728,6 +769,22 @@ export default function Sale() {
                                         </div>
                                     )}
 
+                                    {isDiscountApplicable && (
+                                        <div className="flex items-center gap-2">
+                                            <Checkbox
+                                                id="wholesale-discount"
+                                                checked={applyDiscount}
+                                                onCheckedChange={(checked) => setApplyDiscount(checked === true)}
+                                            />
+                                            <label
+                                                htmlFor="wholesale-discount"
+                                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                            >
+                                                Apply GH₵ {discountConfig.amount.toFixed(2)} wholesale discount
+                                            </label>
+                                        </div>
+                                    )}
+
                                     <div className="space-y-1 bg-amber-50 dark:bg-amber-900/20 px-3 py-1 rounded border border-amber-200 dark:border-amber-800">
                                         <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase">Item Total</span>
                                         <div className="text-lg font-bold text-amber-800 dark:text-amber-300">
@@ -775,6 +832,9 @@ export default function Sale() {
                                                         GH₵ {item.price.toFixed(2)}
                                                         {item.surcharge > 0 && (
                                                             <span className="text-muted-foreground"> + GH₵ {item.surcharge.toFixed(2)}</span>
+                                                        )}
+                                                        {(item.discount || 0) > 0 && (
+                                                            <span className="text-green-600"> − GH₵ {(item.discount || 0).toFixed(2)}</span>
                                                         )}
                                                     </TableCell>
                                                     <TableCell className="text-center">{item.quantity}</TableCell>
@@ -887,9 +947,11 @@ export default function Sale() {
                             {/* Total Price Section */}
                             <div className="space-y-2">
                                 <span className="text-sm font-semibold text-muted-foreground uppercase block text-center">Grand Total</span>
-                                {depositTotal > 0 && (
+                                {(depositTotal > 0 || cartDiscountTotal > 0) && (
                                     <div className="text-center text-sm text-muted-foreground">
-                                        Items GH₵ {cartSubtotal.toFixed(2)} + Deposit GH₵ {depositTotal.toFixed(2)}
+                                        Items GH₵ {cartSubtotal.toFixed(2)}
+                                        {cartDiscountTotal > 0 && <> (incl. GH₵ {cartDiscountTotal.toFixed(2)} discount)</>}
+                                        {depositTotal > 0 && <> + Deposit GH₵ {depositTotal.toFixed(2)}</>}
                                     </div>
                                 )}
                                 <div className="text-4xl font-black text-center text-amber-900 dark:text-amber-100 py-2">
@@ -1004,9 +1066,12 @@ export default function Sale() {
                                     <div key={`${item.skuCode}-${index}`} className="mb-1">
                                         <p className="font-bold">{index + 1}. {item.productName}</p>
                                         <p className="flex justify-between">
-                                            <span>{item.quantity} x {(item.price + item.surcharge).toFixed(2)}</span>
+                                            <span>{item.quantity} x {(item.price + item.surcharge - (item.discount || 0)).toFixed(2)}</span>
                                             <span>{item.total.toFixed(2)}</span>
                                         </p>
+                                        {(item.discount || 0) > 0 && (
+                                            <p className="text-green-700">incl. GH₵ {(item.discount || 0).toFixed(2)} discount</p>
+                                        )}
                                     </div>
                                 ))}
                                 <div className="my-2 border-t border-dashed border-black" />
@@ -1018,6 +1083,12 @@ export default function Sale() {
                                         </p>
                                         <p className="text-center italic">Refundable in cash when empties are returned</p>
                                     </>
+                                )}
+                                {completedSale.items.reduce((sum, i) => sum + (i.discount || 0) * i.quantity, 0) > 0 && (
+                                    <p className="flex justify-between text-green-700">
+                                        <span>Wholesale discount</span>
+                                        <span>− {(completedSale.items.reduce((sum, i) => sum + (i.discount || 0) * i.quantity, 0)).toFixed(2)}</span>
+                                    </p>
                                 )}
                                 <p className="flex justify-between font-bold">
                                     <span>TOTAL:</span>
@@ -1067,6 +1138,12 @@ export default function Sale() {
                                 <div className="flex justify-between">
                                     <span className="text-muted-foreground">Crate deposit</span>
                                     <span className="font-bold">GH₵ {(proforma.crateDepositTotal ?? 0).toFixed(2)}</span>
+                                </div>
+                            )}
+                            {cartDiscountTotal > 0 && (
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Wholesale discount</span>
+                                    <span className="font-bold text-green-700">− GH₵ {cartDiscountTotal.toFixed(2)}</span>
                                 </div>
                             )}
                             <div className="flex justify-between border-t pt-2 text-base">

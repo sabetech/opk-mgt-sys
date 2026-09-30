@@ -530,6 +530,9 @@ export default function OrderDetails() {
                                                 <div className="flex flex-col">
                                                     <span className="font-medium">{item.products?.sku_name}</span>
                                                     <span className="text-xs text-muted-foreground font-mono">{item.products?.product_code || item.products?.code_name}</span>
+                                                    {(item.discount || 0) > 0 && (
+                                                        <span className="text-xs text-green-700">incl. GH₵ {(item.discount || 0).toFixed(2)} wholesale discount</span>
+                                                    )}
                                                 </div>
                                             </TableCell>
                                             <TableCell className="text-right">GH₵ {item.unit_price.toFixed(2)}</TableCell>
@@ -537,6 +540,16 @@ export default function OrderDetails() {
                                             <TableCell className="text-right font-bold">GH₵ {item.sub_total.toFixed(2)}</TableCell>
                                         </TableRow>
                                     ))}
+                                    {items.reduce((sum, i) => sum + (i.discount || 0), 0) > 0 && (
+                                        <TableRow className="bg-green-50/50">
+                                            <TableCell colSpan={3} className="text-right text-xs">
+                                                incl. wholesale discount savings
+                                            </TableCell>
+                                            <TableCell className="text-right text-sm font-bold text-green-700">
+                                                − GH₵ {items.reduce((sum, i) => sum + (i.discount || 0), 0).toFixed(2)}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
                                     <TableRow className="bg-muted/30 font-bold">
                                         <TableCell colSpan={3} className="text-right uppercase text-xs tracking-wider">Grand Total</TableCell>
                                         <TableCell className="text-right text-lg text-amber-900 dark:text-amber-100 italic">

@@ -362,7 +362,7 @@ export default function FieldSaleForm({
                             <TableHeader>
                                 <TableRow>
                                     <TableHead>Product</TableHead>
-                                    <TableHead className="text-right w-[92px]">Qty</TableHead>
+                                    <TableHead className="text-right w-[112px]">Qty</TableHead>
                                     <TableHead className="text-right">Total</TableHead>
                                     <TableHead className="w-[44px]"></TableHead>
                                 </TableRow>
@@ -390,7 +390,7 @@ export default function FieldSaleForm({
                                                         value={item.quantity}
                                                         onChange={(e) => updateQuantity(item.id, parseInt(e.target.value) || 0)}
                                                         disabled={saving || itemsLocked}
-                                                        className="h-11 text-right font-bold text-base px-2"
+                                                        className="h-14 text-right font-bold text-xl px-3"
                                                     />
                                                 </TableCell>
                                                 <TableCell className="text-right font-bold text-sm whitespace-nowrap">
@@ -451,7 +451,7 @@ export default function FieldSaleForm({
                                 setEmptiesTouched(true)
                             }}
                             disabled={saving || emptiesLocked}
-                            className="h-12 text-lg font-bold flex-1"
+                            className="h-14 text-xl font-bold flex-1"
                             placeholder="0"
                         />
                         {emptiesTouched && (
@@ -459,7 +459,7 @@ export default function FieldSaleForm({
                                 type="button"
                                 variant="outline"
                                 size="icon"
-                                className="h-12 w-12 shrink-0"
+                                className="h-14 w-14 shrink-0"
                                 title="Reset to returnable quantity"
                                 onClick={() => {
                                     setEmpties(String(returnableQty))
