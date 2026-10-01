@@ -20,6 +20,7 @@ import { buildSaleReceiptHtml, buildProformaHtml, generateProformaReference, pri
 import { suggestProduct } from "@/lib/productSearch"
 import { fetchCustomerBalance } from "@/lib/customerBalance"
 import { assertEmptiesPurchaseAllowed } from "@/lib/emptiesGuard"
+import { moveYardStock } from "@/lib/emptiesStock"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -472,6 +473,24 @@ export default function Sale() {
 
                 for (const detail of detailsToInsert) {
                     await pb.collection('empties_log_detail').create(detail)
+                }
+
+                // 2b. Move yard stock: returnable empties go out with the
+                // customer (trade +, full line qty regardless of deposit).
+                // Ground is untouched — full goods leave via warehouse_stock.
+                // Ledger above is the source of truth — a tally failure warns
+                // without blocking the sale.
+                try {
+                    await moveYardStock(
+                        returnableItems.map(item => ({
+                            productId: item.productId,
+                            groundDelta: 0,
+                            tradeDelta: item.quantity,
+                        }))
+                    )
+                } catch (yardError) {
+                    console.error("Failed to update yard stock (sale completed):", yardError)
+                    toast.warning("Sale saved, but yard stock needs review — reconcile manually.")
                 }
             }
 

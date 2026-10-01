@@ -37,6 +37,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
+import { moveYardStock } from "@/lib/emptiesStock"
 import { toast } from "sonner"
 
 interface Customer {
@@ -224,6 +225,22 @@ export default function CustomerReturnEmpties() {
                 toast.success(`Return recorded! Refund GH₵ ${refundedAmount.toFixed(2)} in ${refundMethod.replace(/_/g, " ")} for ${refundedCrates} crate(s).`)
             } else {
                 toast.success("Return recorded successfully!")
+            }
+
+            // 4. Move yard stock: physical empties arrived (ground +) and left
+            // the trade pool (trade −, unclamped). Ledger above is the source
+            // of truth — a tally failure warns without rolling back.
+            try {
+                await moveYardStock(
+                    returnItems.map((item) => ({
+                        productId: item.productId,
+                        groundDelta: item.quantity,
+                        tradeDelta: -item.quantity,
+                    }))
+                )
+            } catch (yardError) {
+                console.error("Failed to update yard stock (return recorded):", yardError)
+                toast.warning("Return recorded, but yard stock needs review — reconcile manually.")
             }
 
             // Reset form
