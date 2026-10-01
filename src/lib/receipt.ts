@@ -81,20 +81,21 @@ body {
     margin: 0 auto;
     padding: 2mm 1mm 6mm;
     font-family: "Courier New", Courier, monospace;
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.5;
     color: #000;
 }
 .center { text-align: center; }
-.company { font-size: 15px; font-weight: bold; }
-.divider { border-top: 1px dashed #000; margin: 6px 0; }
+.company { font-size: 17px; font-weight: 700; }
+.divider { border-top: 2px solid #000; margin: 6px 0; }
 table { width: 100%; border-collapse: collapse; }
 td { padding: 1px 0; vertical-align: top; word-wrap: break-word; }
-.item { font-weight: bold; }
-.muted { font-weight: normal; font-size: 11px; }
+.item { font-weight: 700; }
+.muted { font-weight: 700; font-size: 12px; }
 .line { display: flex; justify-content: space-between; gap: 8px; }
-.totals { display: flex; justify-content: space-between; gap: 8px; font-weight: bold; }
-.grand { font-size: 15px; }
+.totals { display: flex; justify-content: space-between; gap: 8px; font-weight: 700; }
+.grand { font-size: 17px; }
 .meta { display: flex; justify-content: space-between; gap: 8px; }
 @media print {
     body { width: 72mm; margin: 0 auto; }
@@ -117,6 +118,7 @@ ${discountTotal > 0 ? `<div class="totals"><span>Wholesale discount:</span><span
 ${(sale.crateDepositQty ?? 0) > 0 ? `<div class="totals"><span>Crate deposit (${sale.crateDepositQty} x ${formatMoney(sale.crateDepositUnitAmount ?? 0)}):</span><span>GHc ${formatMoney(sale.crateDepositTotal ?? 0)}</span></div><div class="muted center">Refundable in cash when empties are returned</div>` : ""}
 <div class="totals grand"><span>TOTAL:</span><span>GHc ${formatMoney(sale.grandTotal)}</span></div>
 <div class="divider"></div>
+<div class="center"><strong>Goods sold are not returnable.</strong></div>
 <div class="center">Thank you for your patronage!</div>
 </body></html>`
 }

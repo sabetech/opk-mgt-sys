@@ -34,6 +34,14 @@ describe("buildSaleReceiptHtml (SALE-01 receipt)", () => {
     expect(html).toContain("Crate deposit");
     expect(html).toContain("72mm");
     expect(html).toContain("#100001");
+    expect(html).toContain("Goods sold are not returnable.");
+  });
+
+  it("uses deep-print styles for thermal printers (bold, larger, solid dividers)", () => {
+    const html = buildSaleReceiptHtml(sale);
+    expect(html).toContain("font-size: 14px");
+    expect(html).toContain("font-weight: 700");
+    expect(html).toContain("border-top: 2px solid #000");
   });
 
   it("omits deposit block when zero", () => {
