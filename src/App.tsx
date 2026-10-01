@@ -116,7 +116,7 @@ function App() {
                 <Route path="receivables-log" element={<ReceivablesLog />} />
                 <Route path="inventory-log" element={<InventoryLog />} />
                 <Route path="add-loadout" element={
-                  <ProtectedRoute allowedRoles={['admin']}>
+                  <ProtectedRoute allowedRoles={['admin', 'warehouse_manager']}>
                     <AddLoadout />
                   </ProtectedRoute>
                 } />
