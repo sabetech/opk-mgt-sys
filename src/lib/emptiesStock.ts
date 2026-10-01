@@ -13,6 +13,48 @@ export interface YardMove {
     tradeDelta: number
 }
 
+export interface GroundPosition {
+    productId: string
+    /** Reconstructed on-ground qty at the start of the period. */
+    opening: number
+    /** Customer returns received during the period (ground inflow). */
+    received: number
+    /** Reconstructed on-ground qty at the end of the period. */
+    closing: number
+}
+
+/**
+ * Reconstructs on-ground positions for a period from the live tally.
+ * Ground moves ONLY on customer returns (+qty each), so:
+ *   opening(from) = live − returns on/after from
+ *   closing(to)   = live − returns after to
+ * (One-off baseline corrections, e.g. the backfill, predate the movement
+ * history and are not backed out — positions before such a correction are
+ * approximate.)
+ */
+export function groundPositions(
+    liveGround: Record<string, number>,
+    returnsSinceFrom: Record<string, number>,
+    returnsAfterTo: Record<string, number>
+): GroundPosition[] {
+    const ids = new Set([
+        ...Object.keys(liveGround),
+        ...Object.keys(returnsSinceFrom),
+        ...Object.keys(returnsAfterTo),
+    ])
+    return [...ids].map((productId) => {
+        const live = liveGround[productId] || 0
+        const received = returnsSinceFrom[productId] || 0
+        const afterTo = returnsAfterTo[productId] || 0
+        return {
+            productId,
+            opening: live - received,
+            received: received - afterTo,
+            closing: live - afterTo,
+        }
+    })
+}
+
 /**
  * Pure yard-stock math. Plain addition on both legs — deliberately NO
  * clamping: quantity_in_trade is the sum of empties with customers, so a

@@ -19,7 +19,7 @@ import {
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { summarizeProductLogs, type InventoryMovementType, type InventoryTransaction } from "@/lib/inventoryLog"
+import { summarizeProductLogs, type InventoryTransaction } from "@/lib/inventoryLog"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"

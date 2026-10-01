@@ -155,10 +155,11 @@ export default function CompletedOrders() {
         fetchOrders()
     }, [dateRange])
 
-    // Filter orders based on search and date range
+    // Filter orders based on search and date range (match the POS order
+    // number, not the internal record id)
     const filteredOrders = orders.filter(order => {
         const matchesSearch =
-            order.order_id.toString().includes(searchTerm) ||
+            String(order.order_number ?? order.order_id).toLowerCase().includes(searchTerm.toLowerCase()) ||
             (order.orders?.customers?.name || "Walk-in").toLowerCase().includes(searchTerm.toLowerCase())
 
         return matchesSearch
@@ -238,7 +239,7 @@ export default function CompletedOrders() {
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
                         type="search"
-                        placeholder="Search orders..."
+                        placeholder="Search by order #, customer..."
                         className="pl-8"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
@@ -271,7 +272,7 @@ export default function CompletedOrders() {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead>Order ID</TableHead>
+                            <TableHead>Order #</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Customer</TableHead>
                             <TableHead>Total Amount</TableHead>

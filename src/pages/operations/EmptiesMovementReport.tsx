@@ -16,6 +16,7 @@ import {
     TableRow,
 } from "@/components/ui/table"
 import { pb, getFullListInBatches } from "@/lib/pocketbase"
+import { groundPositions } from "@/lib/emptiesStock"
 import {
     buildEmptiesMovementHtml,
     printReceiptHtml,
@@ -24,7 +25,7 @@ import {
 } from "@/lib/receipt"
 import { toast } from "sonner"
 
-type TabKey = "in" | "out" | "ggbl" | "vse" | "breakages" | "openings"
+type TabKey = "in" | "out" | "ggbl" | "vse" | "breakages" | "openings" | "ground"
 
 const TABS: { key: TabKey; label: string }[] = [
     { key: "in", label: "In From Customers" },
@@ -32,7 +33,8 @@ const TABS: { key: TabKey; label: string }[] = [
     { key: "ggbl", label: "To GGBL" },
     { key: "vse", label: "VSE Returns" },
     { key: "breakages", label: "Breakages" },
-    { key: "openings", label: "Openings" },
+    { key: "openings", label: "Customer Openings" },
+    { key: "ground", label: "Ground Stock" },
 ]
 
 /** Day-slice range bounds. Works whether the `date` field reads back as
@@ -65,7 +67,10 @@ export default function EmptiesMovementReport() {
         vse: [],
         breakages: [],
         openings: [],
+        ground: [],
     })
+    const [groundOpening, setGroundOpening] = useState(0)
+    const [groundClosing, setGroundClosing] = useState(0)
 
     const fetchData = async () => {
         if (!fromDate || !toDate) return
@@ -86,12 +91,22 @@ export default function EmptiesMovementReport() {
                 })
                 : []
             const detailsByLog: Record<string, { name: string; qty: number }[]> = {}
+            const logById = new Map<string, Record<string, unknown>>(logs.map((l) => [String(l.id), l]))
+            const productNames: Record<string, string> = {}
+            const returnsSinceFrom: Record<string, number> = {}
             for (const d of details) {
                 const rel = d.expand?.product_id
+                const pid = typeof d.product_id === "string" ? d.product_id : ""
+                const name = rel?.sku_name || "Unknown"
+                if (pid && !productNames[pid]) productNames[pid] = name
                 ;(detailsByLog[d.log_id] = detailsByLog[d.log_id] || []).push({
-                    name: rel?.sku_name || "Unknown",
+                    name,
                     qty: d.quantity || 0,
                 })
+                const header = d.log_id ? logById.get(String(d.log_id)) : undefined
+                if (header?.activity === "customer_empties_return" && pid) {
+                    returnsSinceFrom[pid] = (returnsSinceFrom[pid] || 0) + (d.quantity || 0)
+                }
             }
 
             const shapeLog = (l: Record<string, unknown>, actor: string, detail?: string): EmptiesMovementRecord => ({
@@ -113,6 +128,7 @@ export default function EmptiesMovementReport() {
                 vse: [],
                 breakages: [],
                 openings: [],
+                ground: [],
             }
             for (const l of logs) {
                 const customer = (l.expand as Record<string, { name?: string } | undefined> | undefined)?.customer_id
@@ -180,6 +196,66 @@ export default function EmptiesMovementReport() {
                 }
             })
 
+            // 4. Ground positions: opening/closing on-ground qty per product,
+            // reconstructed from the live tally minus returns since. Ground
+            // moves only on customer returns, so backing those out of live
+            // ground recovers both period boundaries.
+            const toStr = format(toDate, "yyyy-MM-dd")
+            const fromStr = format(fromDate, "yyyy-MM-dd")
+            const todayStr = format(new Date(), "yyyy-MM-dd")
+            const returnsAfterTo: Record<string, number> = {}
+            if (format(addDays(toDate, 1), "yyyy-MM-dd") <= todayStr) {
+                const laterLogs = await pb.collection("empties_log").getFullList({
+                    filter: `activity = "customer_empties_return" && date >= "${format(addDays(toDate, 1), "yyyy-MM-dd")}"`,
+                    fields: "id",
+                    $autoCancel: false,
+                })
+                const laterIds = laterLogs.map((l) => l.id)
+                if (laterIds.length > 0) {
+                    const laterDetails = await getFullListInBatches("empties_log_detail", "log_id", laterIds, {
+                        expand: "product_id",
+                    })
+                    for (const d of laterDetails) {
+                        const pid = typeof d.product_id === "string" ? d.product_id : ""
+                        if (!pid) continue
+                        returnsAfterTo[pid] = (returnsAfterTo[pid] || 0) + (d.quantity || 0)
+                        const rel = d.expand?.product_id
+                        if (!productNames[pid]) productNames[pid] = rel?.sku_name || "Unknown"
+                    }
+                }
+            }
+            const yardRows = await pb.collection("empties").getFullList({
+                fields: "product_id, quantity_on_ground",
+                $autoCancel: false,
+            })
+            const liveGround: Record<string, number> = {}
+            for (const r of yardRows) {
+                if (r.product_id) liveGround[r.product_id] = r.quantity_on_ground || 0
+            }
+            const positions = groundPositions(liveGround, returnsSinceFrom, returnsAfterTo)
+            const unnamed = positions.map((p) => p.productId).filter((pid) => !productNames[pid])
+            if (unnamed.length > 0) {
+                const prods = await getFullListInBatches("products", "id", [...new Set(unnamed)], {
+                    fields: "id, sku_name",
+                })
+                for (const p of prods) productNames[p.id] = p.sku_name || p.id.slice(0, 8)
+            }
+            byActivity.ground = positions
+                .filter((p) => p.opening !== 0 || p.received !== 0 || p.closing !== 0)
+                .map((p) => ({
+                    id: `ground:${p.productId}`,
+                    date: `${fromStr} → ${toStr}`,
+                    actor: productNames[p.productId] || p.productId.slice(0, 8),
+                    total: p.closing,
+                    lines: [
+                        { productName: "Opening on ground", quantity: p.opening },
+                        { productName: "Received in range", quantity: p.received },
+                    ],
+                }))
+                .sort((a, b) => a.actor.localeCompare(b.actor))
+            setGroundOpening(positions.reduce((s, p) => s + p.opening, 0))
+            setGroundClosing(positions.reduce((s, p) => s + p.closing, 0))
+
             for (const key of Object.keys(byActivity) as TabKey[]) {
                 byActivity[key].sort((a, b) => b.date.localeCompare(a.date))
             }
@@ -204,6 +280,7 @@ export default function EmptiesMovementReport() {
         vse: records.vse.reduce((s, r) => s + r.total, 0),
         breakages: records.breakages.reduce((s, r) => s + r.total, 0),
         openings: records.openings.reduce((s, r) => s + r.total, 0),
+        ground: groundClosing,
     }
     const net = totals.in - totals.out - totals.ggbl - totals.breakages
 
@@ -227,15 +304,17 @@ export default function EmptiesMovementReport() {
             from: fromDate ? format(fromDate, "yyyy-MM-dd") : "",
             to: toDate ? format(toDate, "yyyy-MM-dd") : "",
             summary: [
+                { label: "Opening On Ground", value: groundOpening },
                 { label: "In From Customers", value: totals.in },
                 { label: "Out To Customers", value: totals.out },
                 { label: "To GGBL", value: totals.ggbl },
                 { label: "VSE Returns", value: totals.vse },
                 { label: "Breakages", value: totals.breakages },
-                { label: "Openings", value: totals.openings },
+                { label: "Closing On Ground", value: totals.ground },
                 { label: "Net (in − out − GGBL − breakages)", value: net },
             ],
             sections: [
+                sectionOf("ground", "Ground Stock Positions", "Closing on ground"),
                 sectionOf("in", "In From Customers", "Total in"),
                 sectionOf("out", "Out To Customers", "Total out"),
                 sectionOf("ggbl", "To GGBL", "Total sent"),
@@ -249,12 +328,13 @@ export default function EmptiesMovementReport() {
 
     const rows = records[tab]
     const summaryCards = [
+        { label: "Opening On Ground", value: groundOpening, tone: "text-blue-600" },
         { label: "In From Customers", value: totals.in, tone: "text-green-600" },
         { label: "Out To Customers", value: totals.out, tone: "text-amber-600" },
         { label: "To GGBL", value: totals.ggbl, tone: "text-muted-foreground" },
         { label: "VSE Returns", value: totals.vse, tone: "text-teal-600" },
         { label: "Breakages", value: totals.breakages, tone: "text-red-600" },
-        { label: "Openings", value: totals.openings, tone: "text-blue-600" },
+        { label: "Closing On Ground", value: totals.ground, tone: "text-blue-700" },
         { label: "Net", value: net, tone: net >= 0 ? "text-green-700" : "text-red-600" },
     ]
 
@@ -360,8 +440,8 @@ export default function EmptiesMovementReport() {
                         <TableRow>
                             <TableHead className="w-[50px]"></TableHead>
                             <TableHead>Date</TableHead>
-                            <TableHead>{tab === "ggbl" ? "Destination" : tab === "vse" ? "VSE" : tab === "breakages" ? "Product" : "Customer"}</TableHead>
-                            <TableHead className="text-right">Total Crates</TableHead>
+                            <TableHead>{tab === "ggbl" ? "Destination" : tab === "vse" ? "VSE" : tab === "breakages" ? "Product" : tab === "ground" ? "Product" : "Customer"}</TableHead>
+                            <TableHead className="text-right">{tab === "ground" ? "Closing" : "Total Crates"}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>

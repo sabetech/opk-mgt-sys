@@ -122,6 +122,7 @@ describe("buildEmptiesMovementHtml", () => {
           totalLabel: "Total in",
           records: [
             {
+              id: "r1",
               date: "2026-09-05",
               actor: "Kofi <Retail>",
               detail: "Ref ABCD",

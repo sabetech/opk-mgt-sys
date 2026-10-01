@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyYardMove } from "../emptiesStock";
+import { applyYardMove, groundPositions } from "../emptiesStock";
 
 describe("applyYardMove (empties ground/trade, no clamping)", () => {
   it("customer return: ground up, trade down", () => {
@@ -20,5 +20,18 @@ describe("applyYardMove (empties ground/trade, no clamping)", () => {
   it("treats missing/zero baselines as zero", () => {
     expect(applyYardMove({ ground: 0, trade: 0 }, { groundDelta: 2, tradeDelta: 2 }))
       .toEqual({ ground: 2, trade: 2 });
+  });
+});
+
+describe("groundPositions (on-ground opening/closing from live tally)", () => {
+  it("backs returns out of live ground for period boundaries", () => {
+    // live 20; 12 returned since from, 5 of those after to
+    const [pos] = groundPositions({ p1: 20 }, { p1: 12 }, { p1: 5 });
+    expect(pos).toEqual({ productId: "p1", opening: 8, received: 7, closing: 15 });
+  });
+
+  it("covers products with no live row or no returns", () => {
+    const out = groundPositions({}, { p1: 4 }, {});
+    expect(out).toEqual([{ productId: "p1", opening: -4, received: 4, closing: 0 }]);
   });
 });

@@ -238,6 +238,7 @@ export interface EmptiesMovementLine {
 }
 
 export interface EmptiesMovementRecord {
+    id: string
     date: string
     /** Who: customer / VSE / driver name. */
     actor: string
