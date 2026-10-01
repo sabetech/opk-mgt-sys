@@ -10,8 +10,10 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { Search, Loader2, Eye, XCircle, CheckCircle } from "lucide-react"
+import { Search, Loader2, Eye, XCircle, CheckCircle, Printer } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
+import { buildSaleReceiptHtml, printReceiptHtml } from "@/lib/receipt"
+import { buildCompletedSaleForReprint } from "@/lib/reprintReceipt"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { format } from "date-fns"
@@ -19,9 +21,9 @@ import ConfirmDialog from "@/components/ConfirmDialog"
 
 interface Order {
     id: string
-    order_number: number
+    order_number: number | null
     date_time: string
-    total_amount: number
+    total_amount: number | null
     status: 'pending' | 'approved' | 'cancelled'
     customer_id: string | null
     customers: {
@@ -41,6 +43,7 @@ export default function Orders() {
     const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
     const [cancelOrderId, setCancelOrderId] = useState<string | null>(null)
     const [canceling, setCanceling] = useState(false)
+    const [printingId, setPrintingId] = useState<string | null>(null)
 
     const fetchOrders = async () => {
         setLoading(true)
@@ -94,6 +97,20 @@ export default function Orders() {
         }
     }
 
+    const handleReprint = async (order: Order) => {
+        if (printingId) return
+        setPrintingId(order.id)
+        try {
+            const sale = await buildCompletedSaleForReprint(order.id)
+            printReceiptHtml(buildSaleReceiptHtml(sale), `Receipt #${sale.orderNumber}`)
+        } catch (err) {
+            console.error("Error reprinting receipt:", err)
+            toast.error("Failed to reprint receipt.")
+        } finally {
+            setPrintingId(null)
+        }
+    }
+
     const getStatusStyle = (status: string) => {
         switch (status) {
             case 'approved': return 'bg-green-100 text-green-700 border-green-200'
@@ -105,7 +122,7 @@ export default function Orders() {
 
     const filteredOrders = orders.filter(order =>
         (order.customers?.name || "Walk-in").toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.order_number.toString().includes(searchTerm)
+        String(order.order_number ?? "").includes(searchTerm)
     )
 
     return (
@@ -153,7 +170,7 @@ export default function Orders() {
                         ) : filteredOrders.length > 0 ? (
                             filteredOrders.map((order) => (
                                 <TableRow key={order.id}>
-                                    <TableCell className="font-mono text-sm">#{order.order_number}</TableCell>
+                                    <TableCell className="font-mono text-sm">#{order.order_number ?? "—"}</TableCell>
                                     <TableCell className="text-sm">
                                         {format(new Date(order.date_time), 'MMM dd, yyyy HH:mm')}
                                     </TableCell>
@@ -164,7 +181,7 @@ export default function Orders() {
                                         </Badge>
                                     </TableCell>
                                     <TableCell className="text-right font-bold">
-                                        GH₵ {order.total_amount.toFixed(2)}
+                                        GH₵ {(order.total_amount ?? 0).toFixed(2)}
                                     </TableCell>
                                     <TableCell className="text-center">
                                         <Badge className={`capitalize py-0.5 ${getStatusStyle(order.status)}`} variant="outline">
@@ -173,6 +190,20 @@ export default function Orders() {
                                     </TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex justify-end gap-2">
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="h-8"
+                                                title={`Reprint receipt #${order.order_number ?? ""}`}
+                                                onClick={() => handleReprint(order)}
+                                                disabled={printingId === order.id}
+                                            >
+                                                {printingId === order.id ? (
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                ) : (
+                                                    <Printer className="h-3.5 w-3.5 mr-1" />
+                                                )} Reprint
+                                            </Button>
                                             {order.status === 'pending' ? (
                                                 <>
                                                     <Button
