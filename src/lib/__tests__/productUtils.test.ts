@@ -5,6 +5,8 @@ import {
   getStockBadgeText,
   getStockBadgeVariant,
   getStockLevel,
+  isEmptiesEligible,
+  isSellable,
   validateProductForm,
 } from "../productUtils";
 
@@ -60,5 +62,21 @@ describe("validateProductForm (CUST/Setup validation)", () => {
   it("code_name charset only (shared category label, never unique)", () => {
     expect(validateProductForm({ sku_name: "ok", code_name: "H/L KEG" })).not.toHaveProperty("code_name");
     expect(validateProductForm({ sku_name: "ok", code_name: "!!!" })).toHaveProperty("code_name");
+  });
+});
+
+describe("empties-only crates (EPC)", () => {
+  it("isEmptiesEligible covers returnables plus empties-only, legacy rows by returnable", () => {
+    expect(isEmptiesEligible({ returnable: true })).toBe(true);
+    expect(isEmptiesEligible({ returnable: false, empties_only: true })).toBe(true);
+    expect(isEmptiesEligible({ returnable: false })).toBe(false);
+    expect(isEmptiesEligible({})).toBe(false);
+  });
+
+  it("isSellable excludes only empties-only crates, defaults to sellable", () => {
+    expect(isSellable({ returnable: true })).toBe(true);
+    expect(isSellable({ returnable: false })).toBe(true);
+    expect(isSellable({ returnable: false, empties_only: true })).toBe(false);
+    expect(isSellable({})).toBe(true);
   });
 });

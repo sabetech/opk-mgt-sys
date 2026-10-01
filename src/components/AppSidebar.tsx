@@ -129,6 +129,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Adjustments Log", href: "/dashboard/operations/adjustments-log", roles: ["admin", "operations_manager", "auditor", "sales_manager"] },
                 { title: "Take Empties Count", href: "/dashboard/operations/empties-count", roles: ["admin", "operations_manager", "warehouse_manager", "empties_manager"] },
                 { title: "Empties Count Reports", href: "/dashboard/operations/empties-count-reports", roles: ["admin", "operations_manager", "warehouse_manager", "auditor", "empties_manager"] },
+                { title: "Empties Movement Report", href: "/dashboard/operations/empties-movement", roles: ["admin", "operations_manager", "auditor", "empties_manager"] },
                 { title: "VSE Empties Approvals", href: "/dashboard/operations/vse-empties-approvals", roles: ["admin", "empties_manager"] },
                 { title: "Setup", href: "/dashboard/operations/setup", roles: ["admin", "operations_manager"] },
             ],

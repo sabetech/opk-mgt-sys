@@ -230,6 +230,102 @@ export interface StockLevelRow {
     category: string
 }
 
+export interface EmptiesMovementLine {
+    productName: string
+    quantity: number
+}
+
+export interface EmptiesMovementRecord {
+    date: string
+    /** Who: customer / VSE / driver name. */
+    actor: string
+    /** Extra context: vehicle no., reference, reason. */
+    detail?: string
+    total: number
+    lines: EmptiesMovementLine[]
+}
+
+export interface EmptiesMovementSection {
+    title: string
+    total: number
+    totalLabel: string
+    records: EmptiesMovementRecord[]
+}
+
+export interface EmptiesMovementReport {
+    from: string
+    to: string
+    generatedAt?: Date
+    summary: { label: string; value: number }[]
+    sections: EmptiesMovementSection[]
+}
+
+/**
+ * Builds a standalone A4 HTML document for the empties movement report:
+ * summary cards plus one table section per movement type (in from
+ * customers, out to customers, to GGBL, VSE returns, breakages, openings).
+ */
+export function buildEmptiesMovementHtml(report: EmptiesMovementReport): string {
+    const generated = formatDateTime(report.generatedAt ?? new Date())
+    const summaryCards = report.summary
+        .map((s) => `<div class="card"><div class="card-label">${escapeHtml(s.label)}</div><div class="card-value">${s.value.toLocaleString()}</div></div>`)
+        .join("")
+    const sections = report.sections
+        .map((section) => {
+            const rows = section.records
+                .map((rec, index) => {
+                    const lines = rec.lines.length > 0
+                        ? rec.lines.map((l) => `${escapeHtml(l.productName)}: ${l.quantity.toLocaleString()}`).join("<br />")
+                        : "—"
+                    return `<tr>
+                <td class="center">${index + 1}</td>
+                <td>${escapeHtml(rec.date)}</td>
+                <td>${escapeHtml(rec.actor)}${rec.detail ? `<div class="muted">${escapeHtml(rec.detail)}</div>` : ""}</td>
+                <td>${lines}</td>
+                <td class="right">${rec.total.toLocaleString()}</td>
+            </tr>`
+                })
+                .join("")
+            return `<h3>${escapeHtml(section.title)} <span class="muted">(${escapeHtml(section.totalLabel)}: ${section.total.toLocaleString()})</span></h3>
+<table><thead><tr>
+<th class="center">#</th><th>Date</th><th>Source</th><th>Products</th><th class="right">Total</th>
+</tr></thead><tbody>${rows || `<tr><td colspan="5" class="center">No records in range.</td></tr>`}</tbody></table>`
+        })
+        .join("")
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Empties Movement ${escapeHtml(report.from)} to ${escapeHtml(report.to)}</title>
+<style>
+@page { size: A4; margin: 12mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 0; }
+.company { font-size: 18px; font-weight: bold; }
+h2 { margin: 4px 0; font-size: 22px; }
+h3 { margin: 18px 0 6px; font-size: 15px; }
+.subtitle { color: #444; margin-bottom: 8px; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.card { border: 1px solid #999; padding: 8px; }
+.card-label { font-size: 11px; color: #555; }
+.card-value { font-size: 16px; font-weight: bold; }
+.muted { color: #555; font-size: 11px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; vertical-align: top; }
+th { background: #f0f0f0; font-weight: bold; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+.right { text-align: right; }
+.center { text-align: center; }
+.footer { margin-top: 24px; text-align: center; color: #444; }
+@media print { body { margin: 0; } }
+</style></head><body>
+<div class="company">OPPONG KYEKYEKU DISTRIBUTION LTD</div>
+<h2>Empties Movement Report</h2>
+<div class="subtitle">${escapeHtml(report.from)} to ${escapeHtml(report.to)} | Generated: ${generated}</div>
+<div class="cards">${summaryCards}</div>
+${sections}
+<div class="footer">Thank you for your patronage!</div>
+</body></html>`
+}
+
 /**
  * Builds a standalone A4 HTML document listing current stock levels,
  * grouped by category. Each category gets a full-width header row with

@@ -125,9 +125,10 @@ export default function CustomerReturnEmpties() {
     useEffect(() => {
         async function fetchData() {
             try {
-                // Fetch Products
+                // Fetch Products (empties-eligible: returnables + empties-only
+                // crates like EPCs, which customers may return for balance)
                 const productsData = await pb.collection('products').getFullList({
-                    filter: 'returnable = true',
+                    filter: '(returnable = true || empties_only = true) && deleted_at = ""',
                     sort: 'sku_name',
                     fields: 'id, sku_name'
                 })

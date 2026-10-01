@@ -12,10 +12,14 @@ import {
     XCircle,
     Gift,
     RefreshCcw,
+    Undo2,
+    TrendingUp,
+    TrendingDown,
     Loader2
 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { summarizeProductLogs, type InventoryMovementType, type InventoryTransaction } from "@/lib/inventoryLog"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -30,14 +34,7 @@ import {
 } from "@/components/ui/table"
 
 // Types
-type Transaction = {
-    id: string
-    time: string
-    description: string
-    type: 'supplier_receipt' | 'vse_loadout' | 'vse_return' | 'retail_sale' | 'wholesale_sale' | 'breakage' | 'promo_out' | 'promo_reimbursement' | 'opening_stock'
-    quantity: number
-    balance: number
-}
+type Transaction = InventoryTransaction
 
 type ProductInventory = {
     id: string
@@ -46,12 +43,21 @@ type ProductInventory = {
     totalReceived: number
     vsesSent: number
     totalSold: number
+    reverted: number
     vsesReturned: number
     breakages: number
     promoStock: number
     reimbursement: number
+    customerReturns: number
+    adjustmentsNet: number
     closingStock: number
     transactions: Transaction[]
+}
+
+/** Explicit-sign number: +5 / -5 / 0 (toLocaleString never emits "+"). */
+function fmtSigned(value: number): string {
+    const rounded = Math.round(value * 100) / 100
+    return `${rounded > 0 ? "+" : ""}${rounded.toLocaleString()}`
 }
 
 export default function InventoryLog() {
@@ -84,58 +90,50 @@ export default function InventoryLog() {
             })
             logs.sort((a, b) => String(a.created).localeCompare(String(b.created)))
 
-            // 3. Process data
+            // 3. Live warehouse quantities so closing/opening are real stock
+            // figures, not just the day's net movement.
+            const stockRows = await pb.collection('warehouse_stock').getFullList({
+                fields: 'product_id, quantity',
+            })
+            const liveQty = new Map<string, number>()
+            for (const s of stockRows) {
+                if (s.product_id) liveQty.set(s.product_id, s.quantity || 0)
+            }
+
+            // 4. Process data
             const processedData: ProductInventory[] = (products || []).map((product) => {
                 const productLogs = (logs || []).filter((l) => l.product_id === product.id)
+                const summary = summarizeProductLogs(productLogs.map((l) => ({
+                    id: l.id,
+                    product_id: l.product_id,
+                    type: l.type,
+                    quantity: l.quantity || 0,
+                    description: l.description,
+                    created: l.created,
+                })))
 
-                let openingStock = 0
-                let totalReceived = 0
-                let vsesSent = 0
-                let totalSold = 0
-                let vsesReturned = 0
-                let breakages = 0
-                let promoStock = 0
-                let reimbursement = 0
-
-                const transactions: Transaction[] = []
-                let runningBalance = 0
-
-                productLogs.forEach((log) => {
-                    const qty = log.quantity
-                    runningBalance += qty
-
-                    if (log.type === 'opening_stock') openingStock += qty
-                    else if (log.type === 'supplier_receipt') totalReceived += qty
-                    else if (log.type === 'vse_loadout') vsesSent += Math.abs(qty)
-                    else if (log.type === 'vse_return') vsesReturned += Math.abs(qty)
-                    else if (log.type === 'retail_sale' || log.type === 'wholesale_sale') totalSold += Math.abs(qty)
-                    else if (log.type === 'breakage') breakages += Math.abs(qty)
-                    else if (log.type === 'promo_out') promoStock += Math.abs(qty)
-                    else if (log.type === 'promo_reimbursement') reimbursement += qty
-
-                    transactions.push({
-                        id: log.id.toString(),
-                        time: format(new Date(log.created), "hh:mm a"),
-                        description: log.description || log.type.replace(/_/g, ' '),
-                        type: log.type as Transaction['type'],
-                        quantity: qty,
-                        balance: runningBalance
-                    })
-                })
+                // True closing = live warehouse stock; opening backs out the
+                // day's signed net. (The old code summed only the day's logs
+                // from zero and mislabeled the result as closing stock.)
+                const closingStock = liveQty.get(product.id) ?? 0
+                const openingStock = closingStock - summary.dayNet
 
                 return {
                     id: product.id.toString(),
                     name: product.sku_name,
                     openingStock,
-                    totalReceived,
-                    vsesSent,
-                    totalSold,
-                    vsesReturned,
-                    breakages,
-                    promoStock,
-                    reimbursement,
-                    closingStock: runningBalance,
-                    transactions
+                    totalReceived: summary.totalReceived,
+                    vsesSent: summary.vsesSent,
+                    totalSold: summary.totalSold,
+                    reverted: summary.reverted,
+                    vsesReturned: summary.vsesReturned,
+                    breakages: summary.breakages,
+                    promoStock: summary.promoStock,
+                    reimbursement: summary.reimbursement,
+                    customerReturns: summary.customerReturns,
+                    adjustmentsNet: summary.adjustmentsNet,
+                    closingStock,
+                    transactions: summary.transactions
                 }
             })
 
@@ -163,11 +161,15 @@ export default function InventoryLog() {
     // Calculate Totals
     const totalOpeningStock = filteredData.reduce((acc, item) => acc + item.openingStock, 0)
     const totalClosingStock = filteredData.reduce((acc, item) => acc + item.closingStock, 0)
+    const totalReverted = filteredData.reduce((acc, item) => acc + item.reverted, 0)
 
     const getTransactionIcon = (type: Transaction['type']) => {
         switch (type) {
             case 'supplier_receipt': return <ArrowDownLeft className="h-4 w-4 text-green-500" />
             case 'vse_return': return <ArrowDownLeft className="h-4 w-4 text-teal-500" />
+            case 'customer_return': return <Undo2 className="h-4 w-4 text-blue-500" />
+            case 'adjustment_increase': return <TrendingUp className="h-4 w-4 text-green-500" />
+            case 'adjustment_decrease': return <TrendingDown className="h-4 w-4 text-red-500" />
             case 'promo_reimbursement': return <RefreshCcw className="h-4 w-4 text-blue-500" />
             case 'opening_stock': return <Package className="h-4 w-4 text-gray-500" />
             case 'breakage': return <XCircle className="h-4 w-4 text-red-500" />
@@ -270,6 +272,8 @@ export default function InventoryLog() {
                             <TableHead className="text-right text-orange-600">VSEs Sent</TableHead>
                             <TableHead className="text-right">Total Sold</TableHead>
                             <TableHead className="text-right text-blue-600">VSEs Returned</TableHead>
+                            <TableHead className="text-right text-blue-600">Returns</TableHead>
+                            <TableHead className="text-right">Adjustments</TableHead>
                             <TableHead className="text-right text-red-600">Breakages</TableHead>
                             <TableHead className="text-right text-purple-600">Promo</TableHead>
                             <TableHead className="text-right text-green-600">Reimbursement</TableHead>
@@ -279,7 +283,7 @@ export default function InventoryLog() {
                     <TableBody>
                         {filteredData.length === 0 && !loading ? (
                             <TableRow>
-                                <TableCell colSpan={11} className="h-24 text-center">
+                                <TableCell colSpan={13} className="h-24 text-center">
                                     No products found or no activity for this date.
                                 </TableCell>
                             </TableRow>
@@ -296,8 +300,10 @@ export default function InventoryLog() {
                                     <TableCell className="text-right font-mono">{product.openingStock}</TableCell>
                                     <TableCell className="text-right font-mono text-green-600">+{product.totalReceived}</TableCell>
                                     <TableCell className="text-right font-mono text-orange-600">-{product.vsesSent}</TableCell>
-                                    <TableCell className="text-right font-mono">-{product.totalSold}</TableCell>
+                                    <TableCell className="text-right font-mono" title={product.reverted > 0 ? `Includes ${product.reverted} reverted (cancelled sales)` : undefined}>{fmtSigned(product.totalSold)}{product.reverted > 0 ? "*" : ""}</TableCell>
                                     <TableCell className="text-right font-mono text-blue-600">+{product.vsesReturned}</TableCell>
+                                    <TableCell className="text-right font-mono text-blue-600">+{product.customerReturns}</TableCell>
+                                    <TableCell className="text-right font-mono">{fmtSigned(product.adjustmentsNet)}</TableCell>
                                     <TableCell className="text-right font-mono text-red-600">-{product.breakages}</TableCell>
                                     <TableCell className="text-right font-mono text-purple-600">-{product.promoStock}</TableCell>
                                     <TableCell className="text-right font-mono text-green-600">+{product.reimbursement}</TableCell>
@@ -306,7 +312,7 @@ export default function InventoryLog() {
 
                                 {expandedRows.has(product.id) && (
                                     <TableRow className="bg-muted/10 hover:bg-muted/10 ring-1 ring-inset ring-muted/50">
-                                        <TableCell colSpan={11} className="p-0">
+                                        <TableCell colSpan={13} className="p-0">
                                             <div className="p-6 bg-slate-50 dark:bg-slate-900/50">
                                                 <h4 className="mb-4 text-sm font-semibold text-muted-foreground flex items-center gap-2">
                                                     <RefreshCcw className="h-4 w-4" />
@@ -320,7 +326,7 @@ export default function InventoryLog() {
                                                                 <TableHead className="w-[50px]"></TableHead>
                                                                 <TableHead>Description</TableHead>
                                                                 <TableHead className="text-right">Quantity</TableHead>
-                                                                <TableHead className="text-right">Balance</TableHead>
+                                                                <TableHead className="text-right">Day Net</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
@@ -358,6 +364,11 @@ export default function InventoryLog() {
                     </TableBody>
                 </Table>
             </div>
+            {totalReverted > 0 && (
+                <p className="text-xs text-muted-foreground italic">
+                    * Total Sold is net of {totalReverted.toLocaleString()} reverted unit(s) from cancelled sales.
+                </p>
+            )}
         </div>
     )
 }

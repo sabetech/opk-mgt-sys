@@ -19,6 +19,24 @@ export const getProductCategory = (product: { code_name: string | null }): strin
   return product.code_name?.trim() || "Uncategorized"
 }
 
+export interface EmptiesEligibility {
+  returnable?: boolean | null
+  empties_only?: boolean | null
+}
+
+/** Selectable anywhere empties are picked (returns, counts, opening
+ * breakdown): returnable products plus empties-only crates like EPCs.
+ * Missing flags default to eligible-iff-returnable (legacy rows). */
+export const isEmptiesEligible = (product: EmptiesEligibility): boolean => {
+  return product.returnable === true || product.empties_only === true
+}
+
+/** Sellable anywhere products are sold (POS, loadouts stay untouched):
+ * everything except empties-only crates. Missing flags default to sellable. */
+export const isSellable = (product: EmptiesEligibility): boolean => {
+  return product.empties_only !== true
+}
+
 export const formatPrice = (price: number | null): string => {
   return price !== null ? `GHc ${price.toFixed(2)}` : 'GHc 0.00'
 }

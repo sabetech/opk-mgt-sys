@@ -60,13 +60,15 @@ export default function CustomerFormFields({ onSuccess, showBreakdown = false }:
         fetchTypes()
     }, [])
 
-    // Returnable catalog for the opening-breakdown picker (breakdown mode only)
+    // Returnable catalog for the opening-breakdown picker (breakdown mode only).
+    // Empties-only crates (EPCs) are included: crates a customer already
+    // holds count toward their opening balance.
     useEffect(() => {
         if (!showBreakdown) return
         const fetchReturnables = async () => {
             try {
                 const data = await pb.collection('products').getFullList({
-                    filter: 'deleted_at = "" && returnable = true',
+                    filter: '(returnable = true || empties_only = true) && deleted_at = ""',
                     sort: 'sku_name',
                     fields: 'id, sku_name, code_name, product_code, returnable',
                 })

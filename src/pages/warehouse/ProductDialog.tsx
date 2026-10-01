@@ -37,7 +37,8 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
         ex_factory_price: '',
         wholesale_price: '',
         retail_price: '',
-        returnable: false
+        returnable: false,
+        empties_only: false
     })
     const [errors, setErrors] = useState<Record<string, string>>({})
     // Warn-only duplicate/quality checks (never auto-merges)
@@ -54,7 +55,8 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                     ex_factory_price: editingProduct.ex_factory_price?.toString() || '',
                     wholesale_price: editingProduct.wholesale_price?.toString() || '',
                     retail_price: editingProduct.retail_price?.toString() || '',
-                    returnable: editingProduct.returnable
+                    returnable: editingProduct.returnable,
+                    empties_only: editingProduct.empties_only === true
                 })
             } else {
                 setFormData({
@@ -63,7 +65,8 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                     ex_factory_price: '',
                     wholesale_price: '',
                     retail_price: '',
-                    returnable: false
+                    returnable: false,
+                    empties_only: false
                 })
             }
             setErrors({})
@@ -257,6 +260,7 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                         <Select
                             value={formData.returnable ? 'yes' : 'no'}
                             onValueChange={(value) => handleInputChange('returnable', value === 'yes')}
+                            disabled={formData.empties_only}
                         >
                             <SelectTrigger>
                                 <SelectValue placeholder="Select returnable status" />
@@ -266,6 +270,33 @@ export default function ProductDialog({ open, onOpenChange, editingProduct, onSa
                                 <SelectItem value="no">No</SelectItem>
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    <div className="flex items-center space-x-2 bg-muted/40 p-3 rounded-lg border">
+                        <input
+                            id="pd-empties-only"
+                            type="checkbox"
+                            className="h-4 w-4 rounded"
+                            checked={formData.empties_only}
+                            onChange={(e) => {
+                                const checked = e.target.checked
+                                setFormData(prev => ({
+                                    ...prev,
+                                    empties_only: checked,
+                                    // Empties-only crates are never sold, so the
+                                    // returnable flag is meaningless for them.
+                                    returnable: checked ? false : prev.returnable,
+                                }))
+                            }}
+                        />
+                        <div className="grid gap-1.5 leading-none">
+                            <Label htmlFor="pd-empties-only" className="text-sm font-bold">
+                                Empties-only crate (not for sale)
+                            </Label>
+                            <p className="text-xs text-muted-foreground">
+                                E.g. EPCs — selectable in empties dropdowns only, hidden from POS.
+                            </p>
+                        </div>
                     </div>
                     
                     <div className="flex justify-end gap-2 pt-4">

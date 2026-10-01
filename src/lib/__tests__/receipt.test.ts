@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildEmptiesMovementHtml,
   buildProformaHtml,
   buildSaleReceiptHtml,
   buildStockLevelsHtml,
@@ -94,6 +95,41 @@ describe("proforma (SALE-02 quote-only)", () => {
     expect(html).toContain("discount");
     expect(html).toContain("Wholesale discount");
     expect(html).toContain("48.00");
+  });
+});
+
+describe("buildEmptiesMovementHtml", () => {
+  it("renders summary, sections, records and empty states with escaped HTML", () => {
+    const html = buildEmptiesMovementHtml({
+      from: "2026-09-01",
+      to: "2026-09-30",
+      summary: [
+        { label: "In from customers", value: 12 },
+        { label: "Net", value: 3 },
+      ],
+      sections: [
+        {
+          title: "In From Customers",
+          total: 12,
+          totalLabel: "Total in",
+          records: [
+            {
+              date: "2026-09-05",
+              actor: "Kofi <Retail>",
+              detail: "Ref ABCD",
+              total: 12,
+              lines: [{ productName: "ABC MINI 330", quantity: 12 }],
+            },
+          ],
+        },
+        { title: "Breakages", total: 0, totalLabel: "Total", records: [] },
+      ],
+    });
+    expect(html).toContain("Empties Movement Report");
+    expect(html).toContain("2026-09-01 to 2026-09-30");
+    expect(html).toContain("Kofi &lt;Retail&gt;");
+    expect(html).toContain("ABC MINI 330");
+    expect(html).toContain("No records in range.");
   });
 });
 

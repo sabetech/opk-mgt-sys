@@ -71,6 +71,7 @@ export default function ManageProducts() {
                 wholesale_price: p.wholesale_price,
                 retail_price: p.retail_price,
                 returnable: p.returnable,
+                empties_only: p.empties_only === true,
                 created: p.created,
                 deleted_at: p.deleted_at,
                 quantity: stockMap.get(p.id) ?? 0,
@@ -136,7 +137,8 @@ export default function ManageProducts() {
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
-                    returnable: formData.returnable
+                    returnable: formData.returnable,
+                    empties_only: formData.empties_only
                 })
 
                 setProducts(prev => prev.map(p =>
@@ -150,6 +152,7 @@ export default function ManageProducts() {
                             wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                             retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
                             returnable: formData.returnable,
+                            empties_only: formData.empties_only,
                         }
                         : p
                 ))
@@ -164,7 +167,8 @@ export default function ManageProducts() {
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
-                    returnable: formData.returnable
+                    returnable: formData.returnable,
+                    empties_only: formData.empties_only
                 })
 
                 setProducts(prev => [...prev, {
@@ -176,6 +180,7 @@ export default function ManageProducts() {
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
                     returnable: formData.returnable,
+                    empties_only: formData.empties_only,
                     created: data.created,
                     deleted_at: data.deleted_at ?? null,
                     quantity: 0,
@@ -335,7 +340,16 @@ export default function ManageProducts() {
                                 return (
                                     <TableRow key={product.id}>
                                         <TableCell className="font-medium font-mono">{displayProductCode(product)}</TableCell>
-                                        <TableCell>{product.sku_name}</TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col gap-1">
+                                                <span>{product.sku_name}</span>
+                                                {product.empties_only && (
+                                                    <Badge variant="outline" className="text-[10px] w-fit bg-blue-50 text-blue-700 border-blue-200">
+                                                        Empties only
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                        </TableCell>
                                         <TableCell className="text-right">{formatPrice(product.ex_factory_price)}</TableCell>
                                         <TableCell className="text-right">{formatPrice(product.wholesale_price)}</TableCell>
                                         <TableCell className="text-right">{formatPrice(product.retail_price)}</TableCell>

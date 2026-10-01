@@ -316,6 +316,9 @@ async function main() {
     await ensureCollection('products', 'base', [
         fld('text', 'sku_name', { required: true }),
         fld('bool', 'returnable'),
+        // Empties-only crates (e.g. EPCs): selectable in empties dropdowns
+        // (returns, counts, opening breakdown) but never sold.
+        fld('bool', 'empties_only'),
         fld('text', 'code_name'),
         // Generated unique product code (e.g. ALVP-001). code_name stays as
         // the shared category label and is intentionally NOT unique.
@@ -740,6 +743,74 @@ async function main() {
                 console.log('  [ok] added missing field product_code to products');
             } else {
                 console.log('  [dry-run] would add missing field product_code to products');
+            }
+        }
+        // Empties-only flag for crates like EPCs (empties dropdowns only,
+        // never sold). Legacy rows read back as unset, which the app treats
+        // as sellable — same as before.
+        if (!productsCodeCol.fields.map((f) => f.name).includes('empties_only')) {
+            if (!flags.dryRun) {
+                const refreshed = (await pb.collections.getFullList()).find((c) => c.name === 'products');
+                await pb.collections.update(refreshed.id, {
+                    fields: [...refreshed.fields, fld('bool', 'empties_only')],
+                });
+                console.log('  [ok] added missing field empties_only to products');
+            } else {
+                console.log('  [dry-run] would add missing field empties_only to products');
+            }
+        }
+    }
+
+    // Allow opening_balance activity on empties_log (per-product opening
+    // breakdown written at customer creation). Without this option the
+    // Add Customer breakdown writes fail validation on older DBs.
+    {
+        const cols = await pb.collections.getFullList();
+        const logCol = cols.find((c) => c.name === 'empties_log');
+        if (logCol) {
+            const activity = logCol.fields.find((f) => f.name === 'activity');
+            const values = [...(activity?.values || [])];
+            if (!values.includes('opening_balance')) {
+                values.push('opening_balance');
+                if (!flags.dryRun) {
+                    const fields = logCol.fields.map((f) =>
+                        f.name === 'activity' ? { ...f, values } : f
+                    );
+                    await pb.collections.update(logCol.id, { fields });
+                    console.log('  [ok] added opening_balance to empties_log activity options');
+                } else {
+                    console.log('  [dry-run] would add opening_balance to empties_log activity options');
+                }
+            }
+        }
+    }
+
+    // Ensure the EPCs empties-only crate exists (returnable = false so sale
+    // empties math never touches it; empties_only surfaces it in empties
+    // dropdowns only).
+    {
+        const existing = await pb.collection('products').getFullList({
+            filter: 'sku_name = "EPCs (3 x 1)" && deleted_at = ""',
+            fields: 'id, empties_only',
+        }).catch(() => []);
+        if (existing.length === 0) {
+            if (!flags.dryRun) {
+                await pb.collection('products').create({
+                    sku_name: 'EPCs (3 x 1)',
+                    code_name: 'EPC',
+                    returnable: false,
+                    empties_only: true,
+                });
+                console.log('  [ok] created EPCs (3 x 1) empties-only product');
+            } else {
+                console.log('  [dry-run] would create EPCs (3 x 1) empties-only product');
+            }
+        } else if (existing[0].empties_only !== true) {
+            if (!flags.dryRun) {
+                await pb.collection('products').update(existing[0].id, { empties_only: true, returnable: false });
+                console.log('  [ok] flagged existing EPCs (3 x 1) as empties-only');
+            } else {
+                console.log('  [dry-run] would flag existing EPCs (3 x 1) as empties-only');
             }
         }
     }

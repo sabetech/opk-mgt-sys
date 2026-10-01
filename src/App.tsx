@@ -41,6 +41,7 @@ import TruckReloadsToGGBL from "@/pages/operations/TruckReloadsToGGBL"
 import AdjustmentsLog from "@/pages/operations/AdjustmentsLog"
 import TakeEmptiesCount from "@/pages/operations/TakeEmptiesCount"
 import EmptiesCountReports from "@/pages/operations/EmptiesCountReports"
+import EmptiesMovementReport from "@/pages/operations/EmptiesMovementReport"
 import SalesReport from "@/pages/reports/SalesReport"
 import OperationsOverview from "@/pages/operations/OperationsOverview"
 import Setup from "@/pages/operations/Setup"
@@ -196,6 +197,11 @@ function App() {
                 <Route path="truck-reloads-to-ggbl" element={
                   <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor']}>
                     <TruckReloadsToGGBL />
+                  </ProtectedRoute>
+                } />
+                <Route path="empties-movement" element={
+                  <ProtectedRoute allowedRoles={['admin', 'operations_manager', 'auditor', 'empties_manager']}>
+                    <EmptiesMovementReport />
                   </ProtectedRoute>
                 } />
                 <Route path="setup" element={

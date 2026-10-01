@@ -68,6 +68,7 @@ export default function Products() {
                 wholesale_price: product.wholesale_price,
                 retail_price: product.retail_price,
                 returnable: product.returnable,
+                empties_only: product.empties_only === true,
                 created: product.created,
                 deleted_at: product.deleted_at,
                 quantity: stockMap[product.id] ?? 0
@@ -153,7 +154,8 @@ export default function Products() {
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
-                    returnable: formData.returnable
+                    returnable: formData.returnable,
+                    empties_only: formData.empties_only
                 })
 
                 // Update local state
@@ -174,7 +176,8 @@ export default function Products() {
                     ex_factory_price: formData.ex_factory_price ? parseFloat(formData.ex_factory_price) : null,
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
-                    returnable: formData.returnable
+                    returnable: formData.returnable,
+                    empties_only: formData.empties_only
                 })
 
                 // Add to local state with zero quantity
@@ -187,6 +190,7 @@ export default function Products() {
                     wholesale_price: formData.wholesale_price ? parseFloat(formData.wholesale_price) : null,
                     retail_price: formData.retail_price ? parseFloat(formData.retail_price) : null,
                     returnable: formData.returnable,
+                    empties_only: formData.empties_only,
                     created: data.created,
                     deleted_at: data.deleted_at ?? null,
                     quantity: 0
@@ -363,7 +367,16 @@ export default function Products() {
                                 return (
                                     <TableRow key={product.id}>
                                         <TableCell className="font-medium font-mono">{displayProductCode(product)}</TableCell>
-                                        <TableCell>{product.sku_name}</TableCell>
+                                        <TableCell>
+                                            <div className="flex flex-col gap-1">
+                                                <span>{product.sku_name}</span>
+                                                {product.empties_only && (
+                                                    <Badge variant="outline" className="text-[10px] w-fit bg-blue-50 text-blue-700 border-blue-200">
+                                                        Empties only
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                        </TableCell>
                                         <TableCell>{formatPrice(product.wholesale_price)}</TableCell>
                                         <TableCell>{formatPrice(product.retail_price)}</TableCell>
                                         <TableCell>

@@ -70,7 +70,7 @@ export default function TakeEmptiesCount() {
     const fetchProducts = async () => {
         try {
             const data = await pb.collection('products').getFullList({
-                filter: 'returnable = true && deleted_at = ""',
+                filter: '(returnable = true || empties_only = true) && deleted_at = ""',
                 sort: 'sku_name',
                 fields: 'id, sku_name, code_name, product_code',
             })

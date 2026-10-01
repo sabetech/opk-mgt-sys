@@ -8,6 +8,9 @@ export interface Product {
   wholesale_price: number | null
   retail_price: number | null
   returnable: boolean
+  /** Empties-only crate (e.g. EPCs): selectable in empties dropdowns
+   * (returns, counts, opening breakdown) but never sold. */
+  empties_only: boolean
   created: string
   deleted_at: string | null
   quantity: number
@@ -22,6 +25,7 @@ export interface ProductForm {
   wholesale_price: string
   retail_price: string
   returnable: boolean
+  empties_only: boolean
 }
 
 export type StockLevel = 'high' | 'medium' | 'low'

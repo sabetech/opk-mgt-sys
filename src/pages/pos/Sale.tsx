@@ -62,6 +62,8 @@ interface Product {
     retail_price: number | null
     wholesale_price: number | null
     returnable?: boolean
+    /** Empties-only crates (EPCs) are filtered out of the sale picker. */
+    empties_only?: boolean
     quantity: number
 }
 
@@ -181,22 +183,26 @@ export default function Sale() {
                     stockMap.set(s.product_id, s.quantity || 0)
                 }
 
-                // Fetch Products
+                // Fetch Products (empties-only crates like EPCs are not for
+                // sale, so they are filtered out of the picker)
                 const productsData = await pb.collection('products').getFullList({
                     filter: 'deleted_at = ""',
                     sort: 'sku_name',
-                    fields: 'id, sku_name, code_name, product_code, retail_price, wholesale_price, returnable'
+                    fields: 'id, sku_name, code_name, product_code, retail_price, wholesale_price, returnable, empties_only'
                 })
-                setProducts(productsData.map((p) => ({
-                    id: p.id,
-                    sku_name: p.sku_name,
-                    code_name: p.code_name,
-                    product_code: p.product_code ?? null,
-                    retail_price: p.retail_price,
-                    wholesale_price: p.wholesale_price,
-                    returnable: p.returnable,
-                    quantity: stockMap.get(p.id) ?? 0,
-                })))
+                setProducts(productsData
+                    .filter((p) => p.empties_only !== true)
+                    .map((p) => ({
+                        id: p.id,
+                        sku_name: p.sku_name,
+                        code_name: p.code_name,
+                        product_code: p.product_code ?? null,
+                        retail_price: p.retail_price,
+                        wholesale_price: p.wholesale_price,
+                        returnable: p.returnable,
+                        empties_only: p.empties_only === true,
+                        quantity: stockMap.get(p.id) ?? 0,
+                    })))
                 setLoadingProducts(false)
 
                 // Fetch Customers
