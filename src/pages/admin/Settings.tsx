@@ -31,6 +31,11 @@ interface WholesaleDiscount {
     customer_ids: string[]
 }
 
+interface WholesaleRetailPricing {
+    product_ids: string[]
+    customer_ids: string[]
+}
+
 interface CrateDeposit {
     amount: number
 }
@@ -56,12 +61,14 @@ export default function Settings() {
     const [savingStock, setSavingStock] = useState(false)
     const [savingSurcharge, setSavingSurcharge] = useState(false)
     const [savingDiscount, setSavingDiscount] = useState(false)
+    const [savingRetailPricing, setSavingRetailPricing] = useState(false)
     const [savingDeposit, setSavingDeposit] = useState(false)
     const [savingEmptiesDisplay, setSavingEmptiesDisplay] = useState(false)
 
     const [stockThresholds, setStockThresholds] = useState<StockThresholds>({ low_max: 20, medium_max: 50 })
     const [surcharge, setSurcharge] = useState<WholesaleSurcharge>({ amount: 2, product_ids: [] })
     const [discount, setDiscount] = useState<WholesaleDiscount>({ amount: 2, product_ids: [], customer_ids: [] })
+    const [retailPricing, setRetailPricing] = useState<WholesaleRetailPricing>({ product_ids: [], customer_ids: [] })
     const [crateDeposit, setCrateDeposit] = useState<CrateDeposit>({ amount: 200 })
     const [emptiesDisplay, setEmptiesDisplay] = useState<EmptiesDisplay>({ mode: "debit" })
     const [products, setProducts] = useState<Product[]>([])
@@ -69,10 +76,13 @@ export default function Settings() {
     const [productSearch, setProductSearch] = useState("")
     const [discountProductSearch, setDiscountProductSearch] = useState("")
     const [discountCustomerSearch, setDiscountCustomerSearch] = useState("")
+    const [retailPricingProductSearch, setRetailPricingProductSearch] = useState("")
+    const [retailPricingCustomerSearch, setRetailPricingCustomerSearch] = useState("")
 
     const [stockSettingsId, setStockSettingsId] = useState<string | null>(null)
     const [surchargeSettingsId, setSurchargeSettingsId] = useState<string | null>(null)
     const [discountSettingsId, setDiscountSettingsId] = useState<string | null>(null)
+    const [retailPricingSettingsId, setRetailPricingSettingsId] = useState<string | null>(null)
     const [depositSettingsId, setDepositSettingsId] = useState<string | null>(null)
     const [emptiesDisplaySettingsId, setEmptiesDisplaySettingsId] = useState<string | null>(null)
 
@@ -134,6 +144,20 @@ export default function Settings() {
                     setDiscountSettingsId(discountRecord.id)
                 } catch {
                     // Record doesn't exist yet (defaults to 2 GHc, nobody eligible)
+                }
+
+                // Fetch retail pricing for wholesalers (eligible wholesalers
+                // pay retail price on eligible products instead of wholesale)
+                try {
+                    const retailPricingRecord = await pb.collection('app_settings').getFirstListItem('key = "wholesale_retail_pricing"')
+                    const raw = retailPricingRecord.value as Partial<WholesaleRetailPricing>
+                    setRetailPricing({
+                        product_ids: Array.isArray(raw.product_ids) ? raw.product_ids : [],
+                        customer_ids: Array.isArray(raw.customer_ids) ? raw.customer_ids : [],
+                    })
+                    setRetailPricingSettingsId(retailPricingRecord.id)
+                } catch {
+                    // Record doesn't exist yet (nobody eligible)
                 }
 
                 // Fetch crate deposit (refundable per-crate fee for retailers
@@ -238,6 +262,29 @@ export default function Settings() {
         }
     }
 
+    const handleSaveRetailPricing = async () => {
+        setSavingRetailPricing(true)
+        try {
+            if (retailPricingSettingsId) {
+                await pb.collection('app_settings').update(retailPricingSettingsId, {
+                    value: retailPricing
+                })
+            } else {
+                const record = await pb.collection('app_settings').create({
+                    key: 'wholesale_retail_pricing',
+                    value: retailPricing
+                })
+                setRetailPricingSettingsId(record.id)
+            }
+            toast.success("Retail pricing settings saved!")
+        } catch (err) {
+            console.error("Error saving retail pricing settings:", err)
+            toast.error("Failed to save retail pricing settings")
+        } finally {
+            setSavingRetailPricing(false)
+        }
+    }
+
     const handleSaveEmptiesDisplay = async () => {
         setSavingEmptiesDisplay(true)
         try {
@@ -314,6 +361,24 @@ export default function Settings() {
         }))
     }
 
+    const toggleRetailPricingProduct = (productId: string) => {
+        setRetailPricing(prev => ({
+            ...prev,
+            product_ids: prev.product_ids.includes(productId)
+                ? prev.product_ids.filter(id => id !== productId)
+                : [...prev.product_ids, productId]
+        }))
+    }
+
+    const toggleRetailPricingCustomer = (customerId: string) => {
+        setRetailPricing(prev => ({
+            ...prev,
+            customer_ids: prev.customer_ids.includes(customerId)
+                ? prev.customer_ids.filter(id => id !== customerId)
+                : [...prev.customer_ids, customerId]
+        }))
+    }
+
     const filteredProducts = products.filter(p => {
         const term = productSearch.toLowerCase()
         return p.sku_name.toLowerCase().includes(term) ||
@@ -328,6 +393,18 @@ export default function Settings() {
 
     const filteredWholesalers = wholesalers.filter(c => {
         const term = discountCustomerSearch.toLowerCase()
+        return c.name.toLowerCase().includes(term) ||
+            (c.phone && c.phone.toLowerCase().includes(term))
+    })
+
+    const filteredRetailPricingProducts = products.filter(p => {
+        const term = retailPricingProductSearch.toLowerCase()
+        return p.sku_name.toLowerCase().includes(term) ||
+            (p.code_name && p.code_name.toLowerCase().includes(term))
+    })
+
+    const filteredRetailPricingWholesalers = wholesalers.filter(c => {
+        const term = retailPricingCustomerSearch.toLowerCase()
         return c.name.toLowerCase().includes(term) ||
             (c.phone && c.phone.toLowerCase().includes(term))
     })
@@ -585,6 +662,110 @@ export default function Settings() {
                     <Button onClick={handleSaveDiscount} disabled={savingDiscount} className="bg-amber-700 hover:bg-amber-800 gap-2">
                         {savingDiscount ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         {savingDiscount ? "Saving..." : "Save Discount Settings"}
+                    </Button>
+                </CardContent>
+            </Card>
+
+            {/* Retail Pricing for Wholesalers */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Retail Pricing for Wholesalers</CardTitle>
+                    <CardDescription>
+                        Selected wholesalers pay the retail price (instead of wholesale)
+                        on selected products. A retail-priced line gets neither the
+                        surcharge nor the discount — one pricing treatment per line.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                        <Label>Apply to Products</Label>
+                        <p className="text-xs text-muted-foreground">
+                            Select which products sell at retail price to eligible wholesalers.
+                        </p>
+                        <div className="relative w-full md:w-72">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                type="search"
+                                placeholder="Search products..."
+                                className="pl-8"
+                                value={retailPricingProductSearch}
+                                onChange={(e) => setRetailPricingProductSearch(e.target.value)}
+                            />
+                        </div>
+                        <div className="border rounded-md max-h-64 overflow-y-auto">
+                            {filteredRetailPricingProducts.length > 0 ? (
+                                filteredRetailPricingProducts.map((product) => (
+                                    <label
+                                        key={product.id}
+                                        className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                                    >
+                                        <Checkbox
+                                            checked={retailPricing.product_ids.includes(product.id)}
+                                            onCheckedChange={() => toggleRetailPricingProduct(product.id)}
+                                        />
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium">{product.sku_name}</span>
+                                            {product.code_name && (
+                                                <span className="text-xs text-muted-foreground">{product.code_name}</span>
+                                            )}
+                                        </div>
+                                    </label>
+                                ))
+                            ) : (
+                                <p className="px-3 py-4 text-sm text-muted-foreground text-center">No products found.</p>
+                            )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            {retailPricing.product_ids.length} product(s) selected
+                        </p>
+                    </div>
+
+                    <div className="space-y-2">
+                        <Label>Eligible Wholesalers</Label>
+                        <p className="text-xs text-muted-foreground">
+                            Only these wholesale customers pay retail price (on the products above).
+                        </p>
+                        <div className="relative w-full md:w-72">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                type="search"
+                                placeholder="Search wholesalers..."
+                                className="pl-8"
+                                value={retailPricingCustomerSearch}
+                                onChange={(e) => setRetailPricingCustomerSearch(e.target.value)}
+                            />
+                        </div>
+                        <div className="border rounded-md max-h-64 overflow-y-auto">
+                            {filteredRetailPricingWholesalers.length > 0 ? (
+                                filteredRetailPricingWholesalers.map((customer) => (
+                                    <label
+                                        key={customer.id}
+                                        className="flex items-center gap-3 px-3 py-2 hover:bg-muted/50 cursor-pointer border-b last:border-b-0"
+                                    >
+                                        <Checkbox
+                                            checked={retailPricing.customer_ids.includes(customer.id)}
+                                            onCheckedChange={() => toggleRetailPricingCustomer(customer.id)}
+                                        />
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium">{customer.name}</span>
+                                            {customer.phone && (
+                                                <span className="text-xs text-muted-foreground">{customer.phone}</span>
+                                            )}
+                                        </div>
+                                    </label>
+                                ))
+                            ) : (
+                                <p className="px-3 py-4 text-sm text-muted-foreground text-center">No wholesalers found.</p>
+                            )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            {retailPricing.customer_ids.length} wholesaler(s) selected
+                        </p>
+                    </div>
+
+                    <Button onClick={handleSaveRetailPricing} disabled={savingRetailPricing} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                        {savingRetailPricing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        {savingRetailPricing ? "Saving..." : "Save Retail Pricing Settings"}
                     </Button>
                 </CardContent>
             </Card>

@@ -21,6 +21,7 @@ import { suggestProduct } from "@/lib/productSearch"
 import { fetchCustomerBalance } from "@/lib/customerBalance"
 import { assertEmptiesPurchaseAllowed } from "@/lib/emptiesGuard"
 import { moveYardStock } from "@/lib/emptiesStock"
+import { isRetailPricingApplicable, resolveUnitPrice } from "@/lib/pricing"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -120,6 +121,10 @@ export default function Sale() {
     // Wholesale discount (fixed per-unit reduction, eligible wholesalers × eligible products)
     const [discountConfig, setDiscountConfig] = useState<{ amount: number; product_ids: string[]; customer_ids: string[] }>({ amount: 0, product_ids: [], customer_ids: [] })
     const [applyDiscount, setApplyDiscount] = useState(false)
+
+    // Retail pricing for select wholesalers (eligible customer × product
+    // pays retail instead of wholesale; exclusive with surcharge/discount)
+    const [retailPricingConfig, setRetailPricingConfig] = useState<{ product_ids: string[]; customer_ids: string[] }>({ product_ids: [], customer_ids: [] })
 
     // Refundable crate deposit (per crate, covers empties shortfall only)
     const [depositConfig, setDepositConfig] = useState<{ amount: number }>({ amount: 200 })
@@ -231,6 +236,20 @@ export default function Sale() {
                     console.error("Failed to load discount settings:", err)
                 }
 
+                // Fetch retail pricing settings (eligible wholesalers pay
+                // retail on eligible products; empty lists = disabled)
+                try {
+                    const retailPricingRecord = await pb.collection('app_settings').getFirstListItem('key = "wholesale_retail_pricing"')
+                    const raw = retailPricingRecord.value
+                    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+                    setRetailPricingConfig({
+                        product_ids: Array.isArray(parsed?.product_ids) ? parsed.product_ids : [],
+                        customer_ids: Array.isArray(parsed?.customer_ids) ? parsed.customer_ids : [],
+                    })
+                } catch (err) {
+                    console.error("Failed to load retail pricing settings:", err)
+                }
+
                 // Fetch crate deposit settings (defaults to 200 GHc/crate)
                 try {
                     const depositRecord = await pb.collection('app_settings').getFirstListItem('key = "crate_deposit"')
@@ -255,23 +274,34 @@ export default function Sale() {
     }, [selectedProduct, selectedCustomer])
 
     const getUnitPrice = (product: Product) => {
-        if (!selectedCustomer) return product.retail_price || 0
-        return selectedCustomer.customer_types?.name === "Wholesaler"
-            ? product.wholesale_price || product.retail_price || 0
-            : product.retail_price || 0
+        return resolveUnitPrice(
+            product,
+            selectedCustomer?.customer_types?.name,
+            selectedCustomer?.id,
+            product.id,
+            retailPricingConfig
+        )
     }
 
-    // Check if wholesale surcharge / discount applies to current selection.
-    // Discount needs BOTH filters (eligible customer AND eligible product) and
-    // wins over surcharge: a line gets one or the other, never both.
+    // Check if wholesale surcharge / discount / retail pricing applies to the
+    // current selection. Retail pricing needs BOTH filters and wins over
+    // both surcharge and discount: one pricing treatment per line.
     const isWholesaler = selectedCustomer?.customer_types?.name === "Wholesaler"
+    const isRetailPricing = isRetailPricingApplicable(
+        selectedCustomer?.customer_types?.name,
+        selectedCustomer?.id,
+        selectedProduct?.id,
+        retailPricingConfig
+    )
     const isDiscountApplicable = isWholesaler &&
+        !isRetailPricing &&
         !!selectedCustomer &&
         discountConfig.customer_ids.includes(selectedCustomer.id) &&
         discountConfig.product_ids.includes(selectedProduct?.id || "") &&
         discountConfig.amount > 0
     const isSurchargeApplicable = isWholesaler &&
         !isDiscountApplicable &&
+        !isRetailPricing &&
         surchargeConfig.product_ids.includes(selectedProduct?.id || "") &&
         surchargeConfig.amount > 0
 
@@ -777,6 +807,14 @@ export default function Sale() {
                                             className="h-9"
                                         />
                                     </div>
+
+                                    {isRetailPricing && (
+                                        <div className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 dark:bg-blue-900/20">
+                                            <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                                                Retail price applies to this wholesaler
+                                            </span>
+                                        </div>
+                                    )}
 
                                     {isSurchargeApplicable && (
                                         <div className="flex items-center gap-2">
