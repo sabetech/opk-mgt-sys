@@ -290,13 +290,16 @@ export default function CompletedOrders() {
                         {paginatedOrders.length > 0 ? (
                             paginatedOrders.map((order) => (
                                 <React.Fragment key={order.id}>
-                                    <TableRow>
+                                    <TableRow
+                                        className="cursor-pointer hover:bg-muted/50"
+                                        onClick={() => navigate(`/dashboard/warehouse/pending-orders/${order.id}`)}
+                                    >
                                         <TableCell className="font-medium">
                                             <Button
                                                 variant="ghost"
                                                 size="sm"
                                                 className="h-8 w-8 p-0 mr-2"
-                                                onClick={() => toggleRowExpansion(order.id)}
+                                                onClick={(e) => { e.stopPropagation(); toggleRowExpansion(order.id) }}
                                             >
                                                 {expandedRows.has(order.id) ? (
                                                     <ChevronDown className="h-4 w-4" />
@@ -310,7 +313,7 @@ export default function CompletedOrders() {
                                         <TableCell>{order.orders?.customers?.name || "Walk-in"}</TableCell>
                                         <TableCell className="font-medium">{formatCurrency(order.orders?.total_amount || 0)}</TableCell>
                                         <TableCell>{order.warehouse_order_items?.length || 0}</TableCell>
-                                        <TableCell className="text-right">
+                                        <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                                             <DropdownMenu>
                                                 <DropdownMenuTrigger asChild>
                                                     <Button variant="ghost" className="h-8 w-8 p-0">
@@ -319,7 +322,7 @@ export default function CompletedOrders() {
                                                     </Button>
                                                 </DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end">
-                                                    <DropdownMenuItem onClick={() => navigate(`/dashboard/pos/orders/${order.order_id}`)}>
+                                                    <DropdownMenuItem onClick={() => navigate(`/dashboard/warehouse/pending-orders/${order.id}`)}>
                                                         View Details
                                                     </DropdownMenuItem>
                                                     <DropdownMenuSeparator />

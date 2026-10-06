@@ -11,6 +11,7 @@ import CratesReturned from "@/pages/crates/CratesReturned"
 import ReturnCrates from "@/pages/crates/ReturnCrates"
 import Products from "@/pages/warehouse/Products"
 import PendingOrders from "@/pages/warehouse/PendingOrders"
+import PendingOrderDetails from "@/pages/warehouse/PendingOrderDetails"
 import CompletedOrders from "@/pages/warehouse/CompletedOrders"
 import RecordReceivable from "@/pages/warehouse/RecordReceivable"
 import ReceivablesLog from "@/pages/warehouse/ReceivablesLog"
@@ -26,6 +27,7 @@ import Sale from "@/pages/pos/Sale"
 import Orders from "@/pages/pos/Orders"
 import OrderDetails from "@/pages/pos/OrderDetails"
 import ManageProducts from "@/pages/pos/ManageProducts"
+import EmptiesDeposit from "@/pages/pos/EmptiesDeposit"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/context/AuthContext"
 import { Toaster } from "sonner"
@@ -103,6 +105,7 @@ function App() {
                 <Route index element={<Navigate to="products" replace />} />
                 <Route path="products" element={<Products />} />
                 <Route path="pending-orders" element={<PendingOrders />} />
+                <Route path="pending-orders/:id" element={<PendingOrderDetails />} />
                 <Route path="completed-orders" element={<CompletedOrders />} />
                 <Route path="adjust-stock" element={
                   <ProtectedRoute allowedRoles={['admin']}>
@@ -233,6 +236,11 @@ function App() {
                 <Route path="record-vse-sales" element={
                   <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
                     <RecordVSESale />
+                  </ProtectedRoute>
+                } />
+                <Route path="empties-deposit" element={
+                  <ProtectedRoute allowedRoles={['admin', 'sales_manager', 'cashier', 'auditor', 'account_manager']}>
+                    <EmptiesDeposit />
                   </ProtectedRoute>
                 } />
               </Route>
