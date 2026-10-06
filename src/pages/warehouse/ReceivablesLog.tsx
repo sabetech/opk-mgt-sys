@@ -41,8 +41,8 @@ interface ReceivableRecord {
     received_by: string
     delivered_by: string
     vehicle_no: string
-    num_of_pallets: number
-    num_of_pcs: number
+    batch_number: string | null
+    expiry_date: string | null
     purchase_order_img_url: string | null
     inventory_receivable_items: ProductItem[]
 }
@@ -69,7 +69,7 @@ export default function ReceivablesLog() {
         try {
             const data = await pb.collection('inventory_receivables').getFullList({
                 sort: '-date',
-                fields: 'id, date, purchase_order_number, received_by, delivered_by, vehicle_no, num_of_pallets, num_of_pcs, purchase_order_img'
+                fields: 'id, date, purchase_order_number, received_by, delivered_by, vehicle_no, batch_number, expiry_date, purchase_order_img'
             })
 
             const receivableIds = data.map((r) => r.id)
@@ -94,8 +94,8 @@ export default function ReceivablesLog() {
                 received_by: rec.received_by,
                 delivered_by: rec.delivered_by,
                 vehicle_no: rec.vehicle_no,
-                num_of_pallets: rec.num_of_pallets,
-                num_of_pcs: rec.num_of_pcs,
+                batch_number: rec.batch_number ?? null,
+                expiry_date: rec.expiry_date ?? null,
                 purchase_order_img_url: rec.purchase_order_img ? pb.files.getURL(rec, rec.purchase_order_img) : null,
                 inventory_receivable_items: itemsByReceivable[rec.id] || []
             }))
@@ -265,7 +265,7 @@ export default function ReceivablesLog() {
                                         <TableRow className="bg-muted/50 hover:bg-muted/50">
                                             <TableCell colSpan={6} className="p-0">
                                                 <div className="p-4 pl-12 bg-muted/30">
-                                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
                                                         <div className="text-xs">
                                                             <span className="text-muted-foreground block">Delivered By:</span>
                                                             <span className="font-semibold">{order.delivered_by}</span>
@@ -275,8 +275,12 @@ export default function ReceivablesLog() {
                                                             <span className="font-semibold">{order.vehicle_no}</span>
                                                         </div>
                                                         <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Pallets / PCs:</span>
-                                                            <span className="font-semibold">{order.num_of_pallets} / {order.num_of_pcs}</span>
+                                                            <span className="text-muted-foreground block">Batch Number:</span>
+                                                            <span className="font-semibold">{order.batch_number || "—"}</span>
+                                                        </div>
+                                                        <div className="text-xs">
+                                                            <span className="text-muted-foreground block">Expiry Date:</span>
+                                                            <span className="font-semibold">{order.expiry_date ? format(new Date(order.expiry_date), "dd MMM yyyy") : "—"}</span>
                                                         </div>
                                                     </div>
 

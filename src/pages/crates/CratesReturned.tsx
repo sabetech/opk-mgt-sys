@@ -57,10 +57,12 @@ export default function CratesReturned() {
             const startDate = dateRange[0].startDate?.toISOString().split('T')[0]
             const endDate = dateRange[0].endDate?.toISOString().split('T')[0]
 
-            // 1. Fetch Returns (empties_log)
+            // 1. Fetch Returns (empties_log). Day-bounded so same-day
+            // selections and the end day of ranges include records with
+            // a time component (bare "yyyy-MM-dd" ends at midnight).
             let filter = 'activity = "empties_to_supplier"'
-            if (startDate) filter += ` && date >= "${startDate}"`
-            if (endDate) filter += ` && date <= "${endDate}"`
+            if (startDate) filter += ` && date >= "${startDate} 00:00:00.000Z"`
+            if (endDate) filter += ` && date <= "${endDate} 23:59:59.999Z"`
 
             const logsData = await pb.collection('empties_log').getFullList({
                 filter,

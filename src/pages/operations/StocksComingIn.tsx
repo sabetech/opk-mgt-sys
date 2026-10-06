@@ -30,11 +30,11 @@ interface ReceivableItem {
 interface ReceivableForm {
     date: string
     purchaseOrderNumber: string
+    batchNumber: string
+    expiryDate: string
     receivedBy: string
     deliveredBy: string
     vehicleNumber: string
-    numberOfPallets: number
-    numberOfPCs: number
     purchaseOrderImage: File | null
     items: ReceivableItem[]
 }
@@ -48,11 +48,11 @@ export default function StocksComingIn() {
     const [formData, setFormData] = useState<ReceivableForm>({
         date: new Date().toISOString().split('T')[0],
         purchaseOrderNumber: "",
+        batchNumber: "",
+        expiryDate: "",
         receivedBy: "",
         deliveredBy: "",
         vehicleNumber: "",
-        numberOfPallets: 0,
-        numberOfPCs: 0,
         purchaseOrderImage: null,
         items: []
     })
@@ -151,6 +151,11 @@ export default function StocksComingIn() {
             return
         }
 
+        if (!formData.batchNumber.trim()) {
+            toast.error('Please enter the Batch Number')
+            return
+        }
+
         if (!formData.receivedBy.trim()) {
             toast.error('Please enter who received the delivery')
             return
@@ -185,8 +190,10 @@ export default function StocksComingIn() {
             createFormData.append('received_by', formData.receivedBy)
             createFormData.append('delivered_by', formData.deliveredBy)
             createFormData.append('vehicle_no', formData.vehicleNumber)
-            createFormData.append('num_of_pallets', String(formData.numberOfPallets))
-            createFormData.append('num_of_pcs', String(formData.numberOfPCs))
+            createFormData.append('batch_number', formData.batchNumber.trim())
+            if (formData.expiryDate) {
+                createFormData.append('expiry_date', formData.expiryDate)
+            }
             if (formData.purchaseOrderImage) {
                 createFormData.append('purchase_order_img', formData.purchaseOrderImage)
             }
@@ -241,11 +248,11 @@ export default function StocksComingIn() {
             setFormData({
                 date: new Date().toISOString().split('T')[0],
                 purchaseOrderNumber: "",
+                batchNumber: "",
+                expiryDate: "",
                 receivedBy: "",
                 deliveredBy: "",
                 vehicleNumber: "",
-                numberOfPallets: 0,
-                numberOfPCs: 0,
                 purchaseOrderImage: null,
                 items: []
             })
@@ -354,26 +361,23 @@ export default function StocksComingIn() {
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="numberOfPallets">Number of Pallets</Label>
+                                <Label htmlFor="batchNumber">Batch Number</Label>
                                 <Input
-                                    id="numberOfPallets"
-                                    type="number"
-                                    min="0"
-                                    placeholder="0"
-                                    value={formData.numberOfPallets}
-                                    onChange={(e) => handleInputChange('numberOfPallets', parseInt(e.target.value) || 0)}
+                                    id="batchNumber"
+                                    placeholder="e.g., B-2026-001"
+                                    value={formData.batchNumber}
+                                    onChange={(e) => handleInputChange('batchNumber', e.target.value)}
+                                    required
                                     disabled={saving}
                                 />
                             </div>
                             <div className="space-y-2">
-                                <Label htmlFor="numberOfPCs">Number of PCs</Label>
+                                <Label htmlFor="expiryDate">Expiry Date</Label>
                                 <Input
-                                    id="numberOfPCs"
-                                    type="number"
-                                    min="0"
-                                    placeholder="0"
-                                    value={formData.numberOfPCs}
-                                    onChange={(e) => handleInputChange('numberOfPCs', parseInt(e.target.value) || 0)}
+                                    id="expiryDate"
+                                    type="date"
+                                    value={formData.expiryDate}
+                                    onChange={(e) => handleInputChange('expiryDate', e.target.value)}
                                     disabled={saving}
                                 />
                             </div>

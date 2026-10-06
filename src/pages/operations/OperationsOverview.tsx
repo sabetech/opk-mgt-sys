@@ -20,7 +20,7 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
-import { pb } from "@/lib/pocketbase"
+import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { toast } from "sonner"
 
 interface OverviewStats {
@@ -132,15 +132,21 @@ export default function OperationsOverview() {
             const startOfDay = `${dateStr} 00:00:00.000Z`
             const endOfDay = `${dateStr} 23:59:59.999Z`
 
-            // 1. Stocks Received Today (inventory_receivables)
+            // 1. Stocks Received Today (inventory_receivables + items)
             const receivablesData = await pb.collection("inventory_receivables").getFullList({
                 filter: `date >= "${startOfDay}" && date <= "${endOfDay}"`,
-                fields: "id, num_of_pallets, num_of_pcs",
+                fields: "id",
                 $autoCancel: false,
             })
             const stocksReceivedCount = receivablesData.length
-            const stocksReceivedToday = receivablesData.reduce(
-                (sum, r) => sum + (r.num_of_pallets || 0) + (r.num_of_pcs || 0),
+            const receivedItems = await getFullListInBatches(
+                'inventory_receivable_items',
+                'receivable_id',
+                receivablesData.map((r) => r.id),
+                { fields: 'qty' }
+            )
+            const stocksReceivedToday = receivedItems.reduce(
+                (sum, item) => sum + (item.qty || 0),
                 0
             )
 

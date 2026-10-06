@@ -40,8 +40,8 @@ interface ReceivableRecord {
     received_by: string
     delivered_by: string
     vehicle_no: string
-    num_of_pallets: number
-    num_of_pcs: number
+    batch_number: string | null
+    expiry_date: string | null
     purchase_order_img_url: string | null
     inventory_receivable_items: ProductItem[]
 }
@@ -49,8 +49,7 @@ interface ReceivableRecord {
 interface PoSummary {
     poNumber: string
     totalQuantity: number
-    pallets: number
-    pcs: number
+    batches: string[]
     vehicles: string[]
 }
 
@@ -75,7 +74,7 @@ export default function StocksComingInLog() {
         try {
             const data = await pb.collection('inventory_receivables').getFullList({
                 sort: '-date',
-                fields: 'id, date, purchase_order_number, received_by, delivered_by, vehicle_no, num_of_pallets, num_of_pcs, purchase_order_img'
+                fields: 'id, date, purchase_order_number, received_by, delivered_by, vehicle_no, batch_number, expiry_date, purchase_order_img'
             })
 
             const receivableIds = data.map((r) => r.id)
@@ -100,8 +99,8 @@ export default function StocksComingInLog() {
                 received_by: rec.received_by,
                 delivered_by: rec.delivered_by,
                 vehicle_no: rec.vehicle_no,
-                num_of_pallets: rec.num_of_pallets,
-                num_of_pcs: rec.num_of_pcs,
+                batch_number: rec.batch_number ?? null,
+                expiry_date: rec.expiry_date ?? null,
                 purchase_order_img_url: rec.purchase_order_img ? pb.files.getURL(rec, rec.purchase_order_img) : null,
                 inventory_receivable_items: itemsByReceivable[rec.id] || []
             }))
@@ -147,10 +146,9 @@ export default function StocksComingInLog() {
         const poRecords = dateFiltered.filter(r => r.purchase_order_number === poNumber)
         const totalQuantity = poRecords.reduce((acc, r) =>
             acc + r.inventory_receivable_items.reduce((pAcc, p) => pAcc + p.qty, 0), 0)
-        const pallets = poRecords.reduce((acc, r) => acc + (r.num_of_pallets || 0), 0)
-        const pcs = poRecords.reduce((acc, r) => acc + (r.num_of_pcs || 0), 0)
+        const batches = [...new Set(poRecords.map(r => r.batch_number).filter(Boolean))] as string[]
         const vehicles = [...new Set(poRecords.map(r => r.vehicle_no).filter(Boolean))]
-        return { poNumber, totalQuantity, pallets, pcs, vehicles }
+        return { poNumber, totalQuantity, batches, vehicles }
     })
 
     const totalProducts = dateFiltered.reduce((acc, order) => {
@@ -242,9 +240,7 @@ export default function StocksComingInLog() {
                                 <CardContent>
                                     <div className="text-2xl font-bold">{summary.totalQuantity}</div>
                                     <p className="text-xs text-muted-foreground">
-                                        {summary.pallets > 0 && `Pallets: ${summary.pallets}`}
-                                        {summary.pallets > 0 && summary.pcs > 0 && ' · '}
-                                        {summary.pcs > 0 && `PCs: ${summary.pcs}`}
+                                        {summary.batches.length > 0 && `Batch${summary.batches.length > 1 ? 'es' : ''}: ${summary.batches.join(', ')}`}
                                         {summary.vehicles.length > 0 && (
                                             <span className="block">Vehicle: {summary.vehicles.join(', ')}</span>
                                         )}
@@ -285,7 +281,7 @@ export default function StocksComingInLog() {
                             <TableHead>Delivered By</TableHead>
                             <TableHead>Vehicle</TableHead>
                             <TableHead className="text-right">Total Qty</TableHead>
-                            <TableHead className="text-right">Pallets/PCs</TableHead>
+                            <TableHead className="text-right">Batch No</TableHead>
                             <TableHead className="text-right">PO Image</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -308,8 +304,8 @@ export default function StocksComingInLog() {
                                         <TableCell className="text-right font-medium">
                                             {order.inventory_receivable_items.reduce((acc, p) => acc + p.qty, 0)}
                                         </TableCell>
-                                        <TableCell className="text-right text-sm">
-                                            {order.num_of_pallets} / {order.num_of_pcs}
+                                        <TableCell className="text-right text-sm font-mono">
+                                            {order.batch_number || "—"}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {order.purchase_order_img_url ? (
@@ -338,6 +334,16 @@ export default function StocksComingInLog() {
                                         <TableRow className="bg-muted/50 hover:bg-muted/50">
                                             <TableCell colSpan={9} className="p-0">
                                                 <div className="p-4 pl-12 bg-muted/30">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 max-w-2xl">
+                                                        <div className="text-xs">
+                                                            <span className="text-muted-foreground block">Batch Number:</span>
+                                                            <span className="font-semibold">{order.batch_number || "—"}</span>
+                                                        </div>
+                                                        <div className="text-xs">
+                                                            <span className="text-muted-foreground block">Expiry Date:</span>
+                                                            <span className="font-semibold">{order.expiry_date ? format(new Date(order.expiry_date), "dd MMM yyyy") : "—"}</span>
+                                                        </div>
+                                                    </div>
                                                     <h4 className="mb-2 text-sm font-semibold text-muted-foreground">Product Breakdown</h4>
                                                     <div className="rounded-md border bg-background overflow-hidden max-w-2xl">
                                                         <Table>

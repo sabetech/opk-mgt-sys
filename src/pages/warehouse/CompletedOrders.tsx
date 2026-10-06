@@ -86,8 +86,14 @@ export default function CompletedOrders() {
     const fetchOrders = async () => {
         setLoading(true)
         try {
-            const startDateStr = dateRange[0].startDate?.toISOString() || ""
-            const endDateStr = dateRange[0].endDate?.toISOString() || ""
+            // Day-bounded ISO strings (T-form so lexicographic compare
+            // works against `date_time`). A raw toISOString range is
+            // midnight-to-midnight, which empties same-day selections and
+            // drops the end day of multi-day ranges.
+            const startDay = dateRange[0].startDate?.toISOString().split('T')[0] || ""
+            const endDay = dateRange[0].endDate?.toISOString().split('T')[0] || ""
+            const startDateStr = startDay ? `${startDay}T00:00:00.000` : ""
+            const endDateStr = endDay ? `${endDay}T23:59:59.999` : ""
 
             const data = await pb.collection('warehouse_orders').getFullList({
                 filter: 'status = "ready"',

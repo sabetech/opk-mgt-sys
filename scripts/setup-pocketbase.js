@@ -335,8 +335,11 @@ async function main() {
         fld('text', 'received_by', { required: true }),
         fld('text', 'delivered_by', { required: true }),
         fld('text', 'vehicle_no', { required: true }),
-        fld('number', 'num_of_pallets'),
-        fld('number', 'num_of_pcs'),
+        // One delivery = one batch. A purchase order spanning multiple
+        // batches is recorded once per batch (purchase_order_number is
+        // intentionally NOT unique).
+        fld('text', 'batch_number'),
+        fld('date', 'expiry_date'),
         fld('file', 'purchase_order_img', {
             mimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
         }),
