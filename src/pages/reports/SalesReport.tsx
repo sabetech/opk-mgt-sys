@@ -90,6 +90,7 @@ export default function SalesReport() {
     const [filterCustomerType, setFilterCustomerType] = useState("all")
     const [filterCustomer, setFilterCustomer] = useState("all")
     const [filterProduct, setFilterProduct] = useState("all")
+    const [filterPaymentType, setFilterPaymentType] = useState("all")
     const [printOpen, setPrintOpen] = useState(false)
 
     const fetchReport = async () => {
@@ -208,6 +209,11 @@ export default function SalesReport() {
         return Array.from(set).sort()
     }, [rows])
 
+    const paymentTypes = useMemo(() => {
+        const set = new Set(rows.map((r) => r.payment_type).filter(Boolean))
+        return Array.from(set).sort()
+    }, [rows])
+
     // Apply filters
     const filteredRows = rows.filter((row) => {
         const matchesSearch =
@@ -219,8 +225,9 @@ export default function SalesReport() {
         const matchesType = filterCustomerType === "all" || row.customer_type === filterCustomerType
         const matchesCustomer = filterCustomer === "all" || row.customer_name === filterCustomer
         const matchesProduct = filterProduct === "all" || row.product_name === filterProduct
+        const matchesPayment = filterPaymentType === "all" || row.payment_type === filterPaymentType
 
-        return matchesSearch && matchesType && matchesCustomer && matchesProduct
+        return matchesSearch && matchesType && matchesCustomer && matchesProduct && matchesPayment
     })
 
     // Summary stats
@@ -239,7 +246,7 @@ export default function SalesReport() {
     // Reset pagination on filter change
     useEffect(() => {
         setCurrentPage(1)
-    }, [searchTerm, filterCustomerType, filterCustomer, filterProduct, dateRange])
+    }, [searchTerm, filterCustomerType, filterCustomer, filterProduct, filterPaymentType, dateRange])
 
     const formatDateRangeDisplay = () => {
         const selectedRange = dateRange[0]
@@ -619,6 +626,23 @@ export default function SalesReport() {
                             <SelectItem value="all">All Products</SelectItem>
                             {productNames.map((pn) => (
                                 <SelectItem key={pn} value={pn}>{pn}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                {/* Payment Mode Filter */}
+                <div className="w-full md:w-48">
+                    <Select value={filterPaymentType} onValueChange={setFilterPaymentType}>
+                        <SelectTrigger>
+                            <SelectValue placeholder="Payment Mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Payments</SelectItem>
+                            {paymentTypes.map((pt) => (
+                                <SelectItem key={pt} value={pt}>
+                                    {pt.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                                </SelectItem>
                             ))}
                         </SelectContent>
                     </Select>
