@@ -404,6 +404,92 @@ tr.cat { page-break-after: avoid; }
 </body></html>`
 }
 
+export interface LoadoutBreakdownProduct {
+    productName: string
+    returnable: boolean
+    given: number
+    sold: number
+    returned: number
+    balance: number
+}
+
+export interface LoadoutBreakdownVse {
+    vseName: string
+    givenRet: number
+    givenNonRet: number
+    given: number
+    sold: number
+    returned: number
+    balance: number
+    details: LoadoutBreakdownProduct[]
+}
+
+/**
+ * Builds a standalone A4 HTML document for the daily loadout breakdown,
+ * grouped by VSE. Each VSE gets a header row with its totals followed by
+ * one line per product (Given / Sold / Returned / Balance).
+ * Columns: # | Product | Type | Given | Sold | Returned | Balance.
+ */
+export function buildLoadoutBreakdownHtml(
+    dateLabel: string,
+    rows: LoadoutBreakdownVse[],
+    generatedAt: Date = new Date()
+): string {
+    const active = rows.filter((r) => r.details.length > 0)
+    const totalGiven = rows.reduce((sum, r) => sum + r.given, 0)
+    const totalSold = rows.reduce((sum, r) => sum + r.sold, 0)
+    const totalReturned = rows.reduce((sum, r) => sum + r.returned, 0)
+    const totalBalance = rows.reduce((sum, r) => sum + r.balance, 0)
+    const bodyRows = active
+        .map((vse) => {
+            const header = `<tr class="cat"><td colspan="7">${escapeHtml(vse.vseName)} — Given ${vse.given} (RET ${vse.givenRet} / NON-RET ${vse.givenNonRet}) · Sold ${vse.sold} · Returned ${vse.returned} · Balance ${vse.balance}</td></tr>`
+            const lines = [...vse.details]
+                .sort((a, b) => a.productName.localeCompare(b.productName))
+                .map(
+                    (d, index) => `<tr>
+                <td class="center">${index + 1}</td>
+                <td>${escapeHtml(d.productName)}</td>
+                <td class="center">${d.returnable ? "RET" : "NON-RET"}</td>
+                <td class="right">${d.given}</td>
+                <td class="right">${d.sold}</td>
+                <td class="right">${d.returned}</td>
+                <td class="right">${d.balance}</td>
+            </tr>`
+                )
+                .join("")
+            return header + lines
+        })
+        .join("")
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8" /><title>Loadout Breakdown — ${escapeHtml(dateLabel)}</title>
+<style>
+@page { size: A4; margin: 12mm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 0; }
+h2 { margin: 0 0 4px; font-size: 18px; }
+.company { font-size: 15px; font-weight: bold; }
+.subtitle { color: #444; margin-bottom: 16px; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
+th { background: #f0f0f0; font-weight: bold; }
+thead { display: table-header-group; }
+tr { page-break-inside: avoid; }
+tr.cat { page-break-after: avoid; }
+.cat td { background: #e2e2e2; font-weight: bold; font-size: 13px; }
+.right { text-align: right; }
+.center { text-align: center; }
+.total { margin-top: 10px; font-weight: bold; }
+@media print { body { margin: 0; } }
+</style></head><body>
+<div class="company">OPPONG KYEKYEKU DISTRIBUTION LTD</div>
+<h2>Loadout Breakdown — ${escapeHtml(dateLabel)}</h2>
+<div class="subtitle">Generated: ${formatDateTime(generatedAt)} | VSEs with activity: ${active.length} | Given: ${totalGiven} | Sold: ${totalSold} | Returned: ${totalReturned} | Balance: ${totalBalance}</div>
+<table><thead><tr>
+<th class="center">#</th><th>Product</th><th class="center">Type</th><th class="right">Given</th><th class="right">Sold</th><th class="right">Returned</th><th class="right">Balance</th>
+</tr></thead><tbody>${bodyRows || `<tr><td colspan="7" class="center">No loadout activity for this date.</td></tr>`}</tbody></table>
+</body></html>`
+}
+
 /**
  * Prints the given receipt HTML via a hidden iframe so the surrounding
  * React app state is preserved (no body-swap / reload hacks).
