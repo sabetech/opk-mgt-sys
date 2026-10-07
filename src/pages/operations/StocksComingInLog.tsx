@@ -22,6 +22,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { pb, getFullListInBatches } from "@/lib/pocketbase"
+import { poImageUrl } from "@/lib/poImage"
 import { toast } from "sonner"
 import React from "react"
 
@@ -74,7 +75,7 @@ export default function StocksComingInLog() {
         try {
             const data = await pb.collection('inventory_receivables').getFullList({
                 sort: '-date',
-                fields: 'id, date, purchase_order_number, received_by, delivered_by, vehicle_no, batch_number, expiry_date, purchase_order_img'
+                fields: 'id, collectionId, date, purchase_order_number, received_by, delivered_by, vehicle_no, batch_number, expiry_date, purchase_order_img, purchase_order_img_url'
             })
 
             const receivableIds = data.map((r) => r.id)
@@ -101,7 +102,7 @@ export default function StocksComingInLog() {
                 vehicle_no: rec.vehicle_no,
                 batch_number: rec.batch_number ?? null,
                 expiry_date: rec.expiry_date ?? null,
-                purchase_order_img_url: rec.purchase_order_img ? pb.files.getURL(rec, rec.purchase_order_img) : null,
+                purchase_order_img_url: poImageUrl(rec),
                 inventory_receivable_items: itemsByReceivable[rec.id] || []
             }))
             setReceivables(shaped)

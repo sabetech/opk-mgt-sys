@@ -343,6 +343,7 @@ async function main() {
         fld('file', 'purchase_order_img', {
             mimeTypes: ['image/png', 'image/jpeg', 'image/gif', 'image/webp'],
         }),
+        fld('text', 'purchase_order_img_url'),
     ], {}, flags.force);
 
     const { customer_types, order_types, products, inventory_receivables } = await getCollectionsMap();

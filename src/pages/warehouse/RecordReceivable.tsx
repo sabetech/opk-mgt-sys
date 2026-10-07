@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/table"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
+import { uploadPoImage } from "@/lib/cloudinary"
 import { toast } from "sonner"
 
 // Types
@@ -183,7 +184,18 @@ export default function RecordReceivable() {
 
         setSaving(true)
         try {
-            // 1. Create receivable record (with optional PO image via file field)
+            // 1. Upload the PO image to Cloudinary before creating the record
+            let cloudinaryUrl: string | null = null
+            if (formData.purchaseOrderImage) {
+                try {
+                    cloudinaryUrl = await uploadPoImage(formData.purchaseOrderImage)
+                } catch (err) {
+                    toast.error(err instanceof Error ? err.message : 'Failed to upload PO image')
+                    return
+                }
+            }
+
+            // 2. Create receivable record (PO image lives on Cloudinary)
             const createFormData = new FormData()
             createFormData.append('date', formData.date)
             createFormData.append('purchase_order_number', formData.purchaseOrderNumber)
@@ -194,13 +206,13 @@ export default function RecordReceivable() {
             if (formData.expiryDate) {
                 createFormData.append('expiry_date', formData.expiryDate)
             }
-            if (formData.purchaseOrderImage) {
-                createFormData.append('purchase_order_img', formData.purchaseOrderImage)
+            if (cloudinaryUrl) {
+                createFormData.append('purchase_order_img_url', cloudinaryUrl)
             }
 
             const receivableData = await pb.collection('inventory_receivables').create(createFormData)
 
-            // 2. Insert into inventory_receivable_items
+            // 3. Insert into inventory_receivable_items
             for (const item of formData.items) {
                 await pb.collection('inventory_receivable_items').create({
                     receivable_id: receivableData.id,
@@ -210,7 +222,7 @@ export default function RecordReceivable() {
                 })
             }
 
-            // 3. Update warehouse_stock and create inventory_logs for each product
+            // 4. Update warehouse_stock and create inventory_logs for each product
             const today = new Date().toISOString().split('T')[0]
             for (const item of formData.items) {
                 const stock = await pb.collection('warehouse_stock')

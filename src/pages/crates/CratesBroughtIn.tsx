@@ -18,6 +18,7 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { pb } from "@/lib/pocketbase"
+import { poImageUrl } from "@/lib/poImage"
 import { toast } from "sonner"
 import { useAuth } from "@/context/AuthContext"
 
@@ -53,7 +54,7 @@ export default function CratesBroughtIn() {
             // 1. Fetch Deliveries (inventory_receivables)
             const receivablesData = await pb.collection('inventory_receivables').getFullList({
                 sort: '-date',
-                fields: 'id, date, vehicle_no, purchase_order_number, received_by, delivered_by, purchase_order_img'
+                fields: 'id, collectionId, date, vehicle_no, purchase_order_number, received_by, delivered_by, purchase_order_img, purchase_order_img_url'
             })
 
             const receivableIds = receivablesData.map((r) => r.id)
@@ -86,7 +87,7 @@ export default function CratesBroughtIn() {
                         purchaseOrderNumber: item.purchase_order_number,
                         receivedBy: item.received_by,
                         deliveredBy: item.delivered_by,
-                        purchaseOrderImage: item.purchase_order_img ? pb.files.getURL(item, item.purchase_order_img) : null,
+                        purchaseOrderImage: poImageUrl(item),
                         products: items.map((r) => ({
                             productName: r.productName,
                             quantity: r.qty
