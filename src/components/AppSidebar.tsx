@@ -145,6 +145,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Add Customer", href: "/dashboard/customers/add", roles: ["admin", "sales_manager", "cashier", "auditor"] },
                 { title: "Manage Products", href: "/dashboard/pos/manage-products", roles: ["admin", "sales_manager"] },
                 { title: "Record VSE Sales", href: "/dashboard/pos/record-vse-sales", roles: ["admin", "sales_manager"] },
+                { title: "Empties Deposit", href: "/dashboard/pos/empties-deposit", roles: ["admin", "sales_manager", "cashier", "auditor", "account_manager"] },
             ],
         },
         {
