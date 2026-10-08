@@ -335,9 +335,11 @@ async function main() {
         fld('text', 'received_by', { required: true }),
         fld('text', 'delivered_by', { required: true }),
         fld('text', 'vehicle_no', { required: true }),
-        // One delivery = one batch. A purchase order spanning multiple
-        // batches is recorded once per batch (purchase_order_number is
-        // intentionally NOT unique).
+        // Legacy: batch/expiry used to live on the delivery record (one
+        // delivery = one batch). They now live per line item on
+        // inventory_receivable_items, so these columns are retained for
+        // historical rows only; new records leave them empty.
+        // purchase_order_number is intentionally NOT unique.
         fld('text', 'batch_number'),
         fld('date', 'expiry_date'),
         fld('file', 'purchase_order_img', {
@@ -386,6 +388,10 @@ async function main() {
         fld('relation', 'product_id', { collectionId: products.id, maxSelect: 1 }),
         fld('number', 'qty', { required: true }),
         fld('date', 'date', { required: true }),
+        // Optional at the PB level (legacy/backfilled rows may lack values);
+        // the app enforces both as required when creating new records.
+        fld('text', 'batch_number'),
+        fld('date', 'expiry_date'),
     ], {}, flags.force);
 
     const { customers, warehouse_stock, inventory_logs } = await getCollectionsMap();

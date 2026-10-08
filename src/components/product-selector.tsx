@@ -47,6 +47,11 @@ interface ProductSelectorProps {
      * render grayed out with the hint and cannot be selected.
      */
     itemState?: (product: Product) => { disabled?: boolean; hint?: string }
+    /**
+     * When true, the same product may be added as multiple rows (e.g. one
+     * row per batch number). Defaults to false (one row per product).
+     */
+    allowDuplicates?: boolean
 }
 
 export function ProductSelector({
@@ -56,17 +61,19 @@ export function ProductSelector({
     quantityLabel = "Quantity",
     disabled = false,
     filterCondition,
-    itemState
+    itemState,
+    allowDuplicates = false
 }: ProductSelectorProps) {
     const [openProduct, setOpenProduct] = useState(false)
     const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
     const [quantity, setQuantity] = useState<string>("1")
     const [query, setQuery] = useState("")
 
-    // Filter products based on condition and already selected items
+    // Filter products based on condition and (unless duplicates are allowed)
+    // already selected items
     const selectedProductIds = new Set(selectedItems.map(item => item.productId))
     const availableProducts = products.filter(product => {
-        const isNotSelected = !selectedProductIds.has(product.id)
+        const isNotSelected = allowDuplicates || !selectedProductIds.has(product.id)
         const meetsCondition = filterCondition ? filterCondition(product) : true
         return isNotSelected && meetsCondition
     })

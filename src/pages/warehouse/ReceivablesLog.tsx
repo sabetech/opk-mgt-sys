@@ -30,6 +30,8 @@ import React from "react"
 interface ProductItem {
     id: string
     qty: number
+    batch_number: string | null
+    expiry_date: string | null
     products: {
         sku_name: string
     }
@@ -42,8 +44,6 @@ interface ReceivableRecord {
     received_by: string
     delivered_by: string
     vehicle_no: string
-    batch_number: string | null
-    expiry_date: string | null
     purchase_order_img_url: string | null
     inventory_receivable_items: ProductItem[]
 }
@@ -70,7 +70,7 @@ export default function ReceivablesLog() {
         try {
             const data = await pb.collection('inventory_receivables').getFullList({
                 sort: '-date',
-                fields: 'id, collectionId, date, purchase_order_number, received_by, delivered_by, vehicle_no, batch_number, expiry_date, purchase_order_img, purchase_order_img_url'
+                fields: 'id, collectionId, date, purchase_order_number, received_by, delivered_by, vehicle_no, purchase_order_img, purchase_order_img_url'
             })
 
             const receivableIds = data.map((r) => r.id)
@@ -84,6 +84,8 @@ export default function ReceivablesLog() {
                 ;(itemsByReceivable[item.receivable_id] = itemsByReceivable[item.receivable_id] || []).push({
                     id: item.id,
                     qty: item.qty,
+                    batch_number: item.batch_number ?? null,
+                    expiry_date: item.expiry_date ?? null,
                     products: rel ? { sku_name: rel.sku_name } : { sku_name: 'Unknown Product' },
                 })
             }
@@ -95,8 +97,6 @@ export default function ReceivablesLog() {
                 received_by: rec.received_by,
                 delivered_by: rec.delivered_by,
                 vehicle_no: rec.vehicle_no,
-                batch_number: rec.batch_number ?? null,
-                expiry_date: rec.expiry_date ?? null,
                 purchase_order_img_url: poImageUrl(rec),
                 inventory_receivable_items: itemsByReceivable[rec.id] || []
             }))
@@ -266,7 +266,7 @@ export default function ReceivablesLog() {
                                         <TableRow className="bg-muted/50 hover:bg-muted/50">
                                             <TableCell colSpan={6} className="p-0">
                                                 <div className="p-4 pl-12 bg-muted/30">
-                                                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 max-w-2xl">
                                                         <div className="text-xs">
                                                             <span className="text-muted-foreground block">Delivered By:</span>
                                                             <span className="font-semibold">{order.delivered_by}</span>
@@ -275,22 +275,16 @@ export default function ReceivablesLog() {
                                                             <span className="text-muted-foreground block">Vehicle Number:</span>
                                                             <span className="font-semibold">{order.vehicle_no}</span>
                                                         </div>
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Batch Number:</span>
-                                                            <span className="font-semibold">{order.batch_number || "—"}</span>
-                                                        </div>
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Expiry Date:</span>
-                                                            <span className="font-semibold">{order.expiry_date ? format(new Date(order.expiry_date), "dd MMM yyyy") : "—"}</span>
-                                                        </div>
                                                     </div>
 
                                                     <h4 className="mb-2 text-sm font-semibold text-muted-foreground">Product Breakdown</h4>
-                                                    <div className="rounded-md border bg-background overflow-hidden max-w-2xl">
+                                                    <div className="rounded-md border bg-background overflow-hidden max-w-3xl">
                                                         <Table>
                                                             <TableHeader>
                                                                 <TableRow className="bg-muted/20">
                                                                     <TableHead className="h-8">Product Name</TableHead>
+                                                                    <TableHead className="h-8">Batch No</TableHead>
+                                                                    <TableHead className="h-8">Expiry Date</TableHead>
                                                                     <TableHead className="h-8 text-right">Quantity</TableHead>
                                                                 </TableRow>
                                                             </TableHeader>
@@ -298,6 +292,10 @@ export default function ReceivablesLog() {
                                                                 {order.inventory_receivable_items.map((item) => (
                                                                     <TableRow key={item.id}>
                                                                         <TableCell className="py-2">{item.products?.sku_name || 'Unknown Product'}</TableCell>
+                                                                        <TableCell className="py-2 font-mono text-sm">{item.batch_number || "—"}</TableCell>
+                                                                        <TableCell className="py-2 text-sm">
+                                                                            {item.expiry_date ? format(new Date(item.expiry_date), "dd MMM yyyy") : "—"}
+                                                                        </TableCell>
                                                                         <TableCell className="py-2 text-right font-medium">{item.qty}</TableCell>
                                                                     </TableRow>
                                                                 ))}

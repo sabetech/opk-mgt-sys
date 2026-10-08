@@ -29,6 +29,8 @@ import React from "react"
 interface ProductItem {
     id: string
     qty: number
+    batch_number: string | null
+    expiry_date: string | null
     products: {
         sku_name: string
     }
@@ -41,8 +43,6 @@ interface ReceivableRecord {
     received_by: string
     delivered_by: string
     vehicle_no: string
-    batch_number: string | null
-    expiry_date: string | null
     purchase_order_img_url: string | null
     inventory_receivable_items: ProductItem[]
 }
@@ -75,7 +75,7 @@ export default function StocksComingInLog() {
         try {
             const data = await pb.collection('inventory_receivables').getFullList({
                 sort: '-date',
-                fields: 'id, collectionId, date, purchase_order_number, received_by, delivered_by, vehicle_no, batch_number, expiry_date, purchase_order_img, purchase_order_img_url'
+                fields: 'id, collectionId, date, purchase_order_number, received_by, delivered_by, vehicle_no, purchase_order_img, purchase_order_img_url'
             })
 
             const receivableIds = data.map((r) => r.id)
@@ -89,6 +89,8 @@ export default function StocksComingInLog() {
                 ;(itemsByReceivable[item.receivable_id] = itemsByReceivable[item.receivable_id] || []).push({
                     id: item.id,
                     qty: item.qty,
+                    batch_number: item.batch_number ?? null,
+                    expiry_date: item.expiry_date ?? null,
                     products: rel ? { sku_name: rel.sku_name } : { sku_name: 'Unknown Product' },
                 })
             }
@@ -100,8 +102,6 @@ export default function StocksComingInLog() {
                 received_by: rec.received_by,
                 delivered_by: rec.delivered_by,
                 vehicle_no: rec.vehicle_no,
-                batch_number: rec.batch_number ?? null,
-                expiry_date: rec.expiry_date ?? null,
                 purchase_order_img_url: poImageUrl(rec),
                 inventory_receivable_items: itemsByReceivable[rec.id] || []
             }))
@@ -143,11 +143,15 @@ export default function StocksComingInLog() {
 
     const uniquePoNumbers = [...new Set(dateFiltered.map(r => r.purchase_order_number))]
 
+    // Batch numbers live on line items now; aggregate for PO-level display.
+    const itemBatches = (record: ReceivableRecord) =>
+        [...new Set(record.inventory_receivable_items.map(i => i.batch_number).filter(Boolean))] as string[]
+
     const poSummaries: PoSummary[] = uniquePoNumbers.map(poNumber => {
         const poRecords = dateFiltered.filter(r => r.purchase_order_number === poNumber)
         const totalQuantity = poRecords.reduce((acc, r) =>
             acc + r.inventory_receivable_items.reduce((pAcc, p) => pAcc + p.qty, 0), 0)
-        const batches = [...new Set(poRecords.map(r => r.batch_number).filter(Boolean))] as string[]
+        const batches = [...new Set(poRecords.flatMap(itemBatches))]
         const vehicles = [...new Set(poRecords.map(r => r.vehicle_no).filter(Boolean))]
         return { poNumber, totalQuantity, batches, vehicles }
     })
@@ -282,7 +286,7 @@ export default function StocksComingInLog() {
                             <TableHead>Delivered By</TableHead>
                             <TableHead>Vehicle</TableHead>
                             <TableHead className="text-right">Total Qty</TableHead>
-                            <TableHead className="text-right">Batch No</TableHead>
+                            <TableHead className="text-right">Batches</TableHead>
                             <TableHead className="text-right">PO Image</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -306,7 +310,7 @@ export default function StocksComingInLog() {
                                             {order.inventory_receivable_items.reduce((acc, p) => acc + p.qty, 0)}
                                         </TableCell>
                                         <TableCell className="text-right text-sm font-mono">
-                                            {order.batch_number || "—"}
+                                            {itemBatches(order).join(', ') || "—"}
                                         </TableCell>
                                         <TableCell className="text-right">
                                             {order.purchase_order_img_url ? (
@@ -335,22 +339,14 @@ export default function StocksComingInLog() {
                                         <TableRow className="bg-muted/50 hover:bg-muted/50">
                                             <TableCell colSpan={9} className="p-0">
                                                 <div className="p-4 pl-12 bg-muted/30">
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4 max-w-2xl">
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Batch Number:</span>
-                                                            <span className="font-semibold">{order.batch_number || "—"}</span>
-                                                        </div>
-                                                        <div className="text-xs">
-                                                            <span className="text-muted-foreground block">Expiry Date:</span>
-                                                            <span className="font-semibold">{order.expiry_date ? format(new Date(order.expiry_date), "dd MMM yyyy") : "—"}</span>
-                                                        </div>
-                                                    </div>
                                                     <h4 className="mb-2 text-sm font-semibold text-muted-foreground">Product Breakdown</h4>
-                                                    <div className="rounded-md border bg-background overflow-hidden max-w-2xl">
+                                                    <div className="rounded-md border bg-background overflow-hidden max-w-3xl">
                                                         <Table>
                                                             <TableHeader>
                                                                 <TableRow className="bg-muted/20">
                                                                     <TableHead className="h-8">Product Name</TableHead>
+                                                                    <TableHead className="h-8">Batch No</TableHead>
+                                                                    <TableHead className="h-8">Expiry Date</TableHead>
                                                                     <TableHead className="h-8 text-right">Quantity</TableHead>
                                                                 </TableRow>
                                                             </TableHeader>
@@ -358,6 +354,10 @@ export default function StocksComingInLog() {
                                                                 {order.inventory_receivable_items.map((item) => (
                                                                     <TableRow key={item.id}>
                                                                         <TableCell className="py-2">{item.products?.sku_name || 'Unknown Product'}</TableCell>
+                                                                        <TableCell className="py-2 font-mono text-sm">{item.batch_number || "—"}</TableCell>
+                                                                        <TableCell className="py-2 text-sm">
+                                                                            {item.expiry_date ? format(new Date(item.expiry_date), "dd MMM yyyy") : "—"}
+                                                                        </TableCell>
                                                                         <TableCell className="py-2 text-right font-medium">{item.qty}</TableCell>
                                                                     </TableRow>
                                                                 ))}

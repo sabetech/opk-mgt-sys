@@ -32,6 +32,11 @@ test.describe("operations P0 flows", () => {
     await page.goto("/dashboard/operations/stocks-coming-in");
     await expect(page.getByRole("heading", { name: "Stocks Coming In" })).toBeVisible();
     await expect(page.getByPlaceholder("e.g., PO-2024-001")).toBeVisible();
+    // Batch/expiry moved off the delivery card onto per-product rows.
+    await expect(page.locator("#batchNumber")).toHaveCount(0);
+    await expect(
+      page.getByText("Each product needs its own batch number and expiry date."),
+    ).toBeVisible();
   });
 
   test("ADJ-01/02 adjustments form renders direction + reason inputs", async ({ page }) => {

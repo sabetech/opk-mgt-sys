@@ -26,13 +26,13 @@ interface ReceivableItem {
     productName: string
     quantity: number
     unitType: string
+    batchNumber: string
+    expiryDate: string
 }
 
 interface ReceivableForm {
     date: string
     purchaseOrderNumber: string
-    batchNumber: string
-    expiryDate: string
     receivedBy: string
     deliveredBy: string
     vehicleNumber: string
@@ -49,8 +49,6 @@ export default function RecordReceivable() {
     const [formData, setFormData] = useState<ReceivableForm>({
         date: new Date().toISOString().split('T')[0],
         purchaseOrderNumber: "",
-        batchNumber: "",
-        expiryDate: "",
         receivedBy: "",
         deliveredBy: "",
         vehicleNumber: "",
@@ -94,21 +92,40 @@ export default function RecordReceivable() {
         }))
     }
 
-    // Handle items change
+    // Handle items change (from the product picker). Merge with the current
+    // rows so batch/expiry already entered on existing rows are preserved.
     const handleItemsChange = (items: SelectedItem[]) => {
-        // Transform SelectedItems to ReceivableItems
-        const receivableItems: ReceivableItem[] = items.map(item => ({
-            id: item.id,
-            productId: item.productId,
-            productCode: item.productCode || 'N/A',
-            productName: item.productName,
-            quantity: item.quantity,
-            unitType: "pcs"
-        }))
+        setFormData(prev => {
+            const existingById = new Map(prev.items.map(item => [item.id, item]))
 
+            const receivableItems: ReceivableItem[] = items.map(item => {
+                const existing = existingById.get(item.id)
+                return {
+                    id: item.id,
+                    productId: item.productId,
+                    productCode: item.productCode || 'N/A',
+                    productName: item.productName,
+                    quantity: item.quantity,
+                    unitType: "pcs",
+                    batchNumber: existing?.batchNumber ?? "",
+                    expiryDate: existing?.expiryDate ?? ""
+                }
+            })
+
+            return {
+                ...prev,
+                items: receivableItems
+            }
+        })
+    }
+
+    // Update a single field (batch/expiry/quantity) on an existing row
+    const updateItem = (itemId: string, field: 'batchNumber' | 'expiryDate' | 'quantity', value: string | number) => {
         setFormData(prev => ({
             ...prev,
-            items: receivableItems
+            items: prev.items.map(item =>
+                item.id === itemId ? { ...item, [field]: value } : item
+            )
         }))
     }
 
@@ -152,11 +169,6 @@ export default function RecordReceivable() {
             return
         }
 
-        if (!formData.batchNumber.trim()) {
-            toast.error('Please enter the Batch Number')
-            return
-        }
-
         if (!formData.receivedBy.trim()) {
             toast.error('Please enter who received the delivery')
             return
@@ -182,6 +194,18 @@ export default function RecordReceivable() {
             return
         }
 
+        const missingBatch = formData.items.find(item => !item.batchNumber.trim())
+        if (missingBatch) {
+            toast.error(`Please enter the batch number for ${missingBatch.productName}`)
+            return
+        }
+
+        const missingExpiry = formData.items.find(item => !item.expiryDate)
+        if (missingExpiry) {
+            toast.error(`Please enter the expiry date for ${missingExpiry.productName}`)
+            return
+        }
+
         setSaving(true)
         try {
             // 1. Upload the PO image to Cloudinary before creating the record
@@ -202,23 +226,21 @@ export default function RecordReceivable() {
             createFormData.append('received_by', formData.receivedBy)
             createFormData.append('delivered_by', formData.deliveredBy)
             createFormData.append('vehicle_no', formData.vehicleNumber)
-            createFormData.append('batch_number', formData.batchNumber.trim())
-            if (formData.expiryDate) {
-                createFormData.append('expiry_date', formData.expiryDate)
-            }
             if (cloudinaryUrl) {
                 createFormData.append('purchase_order_img_url', cloudinaryUrl)
             }
 
             const receivableData = await pb.collection('inventory_receivables').create(createFormData)
 
-            // 3. Insert into inventory_receivable_items
+            // 3. Insert into inventory_receivable_items (batch/expiry live per item)
             for (const item of formData.items) {
                 await pb.collection('inventory_receivable_items').create({
                     receivable_id: receivableData.id,
                     product_id: item.productId,
                     qty: item.quantity,
-                    date: formData.date
+                    date: formData.date,
+                    batch_number: item.batchNumber.trim(),
+                    expiry_date: item.expiryDate
                 })
             }
 
@@ -260,8 +282,6 @@ export default function RecordReceivable() {
             setFormData({
                 date: new Date().toISOString().split('T')[0],
                 purchaseOrderNumber: "",
-                batchNumber: "",
-                expiryDate: "",
                 receivedBy: "",
                 deliveredBy: "",
                 vehicleNumber: "",
@@ -372,27 +392,6 @@ export default function RecordReceivable() {
                                     disabled={saving}
                                 />
                             </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="batchNumber">Batch Number</Label>
-                                <Input
-                                    id="batchNumber"
-                                    placeholder="e.g., B-2026-001"
-                                    value={formData.batchNumber}
-                                    onChange={(e) => handleInputChange('batchNumber', e.target.value)}
-                                    required
-                                    disabled={saving}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="expiryDate">Expiry Date</Label>
-                                <Input
-                                    id="expiryDate"
-                                    type="date"
-                                    value={formData.expiryDate}
-                                    onChange={(e) => handleInputChange('expiryDate', e.target.value)}
-                                    disabled={saving}
-                                />
-                            </div>
                         </div>
 
                         {/* Purchase Order Image Upload */}
@@ -428,7 +427,7 @@ export default function RecordReceivable() {
                     <CardHeader>
                         <CardTitle>Products Received</CardTitle>
                         <CardDescription>
-                            Add the products that were delivered
+                            Add the products that were delivered. Each product needs its own batch number and expiry date.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -444,6 +443,7 @@ export default function RecordReceivable() {
                                 }))}
                                 onItemsChange={handleItemsChange}
                                 quantityLabel="Quantity"
+                                allowDuplicates
                             />
                         )}
 
@@ -454,6 +454,8 @@ export default function RecordReceivable() {
                                     <TableRow>
                                         <TableHead>Product</TableHead>
                                         <TableHead>Code</TableHead>
+                                        <TableHead className="w-[160px]">Batch No</TableHead>
+                                        <TableHead className="w-[160px]">Expiry Date</TableHead>
                                         <TableHead className="text-right">Quantity</TableHead>
                                         <TableHead className="w-[100px]"></TableHead>
                                     </TableRow>
@@ -464,6 +466,24 @@ export default function RecordReceivable() {
                                             <TableRow key={item.id}>
                                                 <TableCell className="font-medium">{item.productName}</TableCell>
                                                 <TableCell>{item.productCode}</TableCell>
+                                                <TableCell>
+                                                    <Input
+                                                        placeholder="e.g., B-2026-001"
+                                                        value={item.batchNumber}
+                                                        onChange={(e) => updateItem(item.id, 'batchNumber', e.target.value)}
+                                                        disabled={saving}
+                                                        aria-label={`Batch number for ${item.productName}`}
+                                                    />
+                                                </TableCell>
+                                                <TableCell>
+                                                    <Input
+                                                        type="date"
+                                                        value={item.expiryDate}
+                                                        onChange={(e) => updateItem(item.id, 'expiryDate', e.target.value)}
+                                                        disabled={saving}
+                                                        aria-label={`Expiry date for ${item.productName}`}
+                                                    />
+                                                </TableCell>
                                                 <TableCell className="text-right">{item.quantity}</TableCell>
                                                 <TableCell>
                                                     <Button
@@ -481,7 +501,7 @@ export default function RecordReceivable() {
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                                            <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                                                 No products added yet.
                                             </TableCell>
                                         </TableRow>
