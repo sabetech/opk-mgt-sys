@@ -5,6 +5,7 @@ import PlaceholderPage from "@/components/PlaceholderPage"
 import AddCustomer from "@/pages/customers/AddCustomer"
 import CustomerList from "@/pages/customers/CustomerList"
 import CustomerReturnEmpties from "@/pages/customers/CustomerReturnEmpties"
+import ReturnCustomerEmpties from "@/pages/customers/ReturnCustomerEmpties"
 import CratesOverview from "@/pages/crates/CratesOverview"
 import CratesBroughtIn from "@/pages/crates/CratesBroughtIn"
 import CratesReturned from "@/pages/crates/CratesReturned"
@@ -83,6 +84,11 @@ function App() {
                 <Route path="return-crates" element={
                   <ProtectedRoute allowedRoles={['admin', 'empties_manager', 'sales_manager']}>
                     <CustomerReturnEmpties />
+                  </ProtectedRoute>
+                } />
+                <Route path="return-customer-empties" element={
+                  <ProtectedRoute allowedRoles={['admin', 'empties_manager', 'sales_manager']}>
+                    <ReturnCustomerEmpties />
                   </ProtectedRoute>
                 } />
               </Route>

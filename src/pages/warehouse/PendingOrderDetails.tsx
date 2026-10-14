@@ -206,6 +206,7 @@ export default function PendingOrderDetails() {
                         customer_id: posOrder.customer_id,
                         activity: 'customer_empties_return',
                         total_quantity: returnableQty,
+                        source: 'order_cancel',
                     })
                     for (const item of whItems) {
                         if (item.expand?.product_id?.returnable !== true || !item.product_id) continue

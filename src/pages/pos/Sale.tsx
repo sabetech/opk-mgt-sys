@@ -498,6 +498,7 @@ export default function Sale() {
                     total_quantity: totalQuantity,
                     deposit_qty: depositQty,
                     deposit_total: depositTotal,
+                    source: 'pos',
                 })
 
                 // 2. Insert into empties_log_detail

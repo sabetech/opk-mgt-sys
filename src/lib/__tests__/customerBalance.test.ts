@@ -26,15 +26,27 @@ describe("fetchCustomerBalances (ledger: opening + returns - purchases)", () => 
     expect(r.c1).toEqual({ opening: 5, ledger: 0, balance: 5 });
   });
 
-  it("returns credit, purchases debit, other activities ignored", async () => {
+  it("requests only non-voided ledger rows (voided returns must not move balances)", async () => {
+    batch.mockResolvedValue([]);
+    await fetchCustomerBalances({ c1: 1 });
+    expect(batch).toHaveBeenCalledWith(
+      "empties_log",
+      "customer_id",
+      ["c1"],
+      expect.objectContaining({ filter: 'voided_at = ""' })
+    );
+  });
+
+  it("returns credit, purchases and reclaims debit, other activities ignored", async () => {
     batch.mockResolvedValue([
       { customer_id: "c1", activity: "customer_empties_return", total_quantity: 10 },
       { customer_id: "c1", activity: "customer_purchase", total_quantity: 4 },
+      { customer_id: "c1", activity: "customer_empties_reclaim", total_quantity: 2 },
       { customer_id: "c1", activity: "empties_to_supplier", total_quantity: 999 },
       { customer_id: "ghost", activity: "customer_purchase", total_quantity: 1 },
     ]);
     const r = await fetchCustomerBalances({ c1: 3 });
-    expect(r.c1).toEqual({ opening: 3, ledger: 6, balance: 9 });
+    expect(r.c1).toEqual({ opening: 3, ledger: 4, balance: 7 });
   });
 
   it("opening_balance detail rows never move the ledger (no double count)", async () => {
@@ -57,6 +69,7 @@ describe("emptiesActivityEffect", () => {
     expect(emptiesActivityEffect("customer_empties_return")).toBe(1);
     expect(emptiesActivityEffect("opening_balance")).toBe(0);
     expect(emptiesActivityEffect("customer_purchase")).toBe(-1);
+    expect(emptiesActivityEffect("customer_empties_reclaim")).toBe(-1);
     expect(emptiesActivityEffect("empties_to_supplier")).toBe(-1);
     expect(emptiesActivityEffect("something_new")).toBe(-1);
   });

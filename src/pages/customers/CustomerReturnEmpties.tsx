@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Check, ChevronsUpDown, Trash2, CalendarIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -37,7 +37,13 @@ import {
 import { Checkbox } from "@/components/ui/checkbox"
 import { ProductSelector, type Product, type SelectedItem } from "@/components/product-selector"
 import { pb } from "@/lib/pocketbase"
-import { moveYardStock } from "@/lib/emptiesStock"
+import {
+    fetchHeldDeposits,
+    findRecentDuplicateReturn,
+    findReturnByRef,
+    generateReturnRef,
+    submitCustomerReturn,
+} from "@/lib/customerEmptiesReturn"
 import { toast } from "sonner"
 
 interface Customer {
@@ -76,34 +82,30 @@ export default function CustomerReturnEmpties() {
     const [refundMethod, setRefundMethod] = useState<string>("cash")
     const [applyRefund, setApplyRefund] = useState(true)
 
+    // Idempotency: one logical submission = one client_ref, kept across
+    // failed attempts so a retry resumes instead of duplicating, dropped on
+    // success or when the payload changes (stale partial record cleaned up
+    // by the effect below). savingRef is checked synchronously so a
+    // double-click can never start a second in-flight submit.
+    const [saving, setSaving] = useState(false)
+    const savingRef = useRef(false)
+    const attemptRef = useRef<{ clientRef: string; signature: string } | null>(null)
+
     // Fetch held deposits whenever the customer changes
     useEffect(() => {
-        async function fetchHeldDeposits() {
+        async function fetchHeld() {
             if (!selectedCustomer) {
                 setHeldDeposits([])
                 return
             }
             try {
-                const data = await pb.collection('crate_deposits').getFullList({
-                    filter: `customer_id = "${selectedCustomer}" && (status = "held" || status = "partial")`,
-                })
-                // NOTE: sorting by `created` server-side fails on some hosts — sort locally.
-                data.sort((a, b) => String(a.created).localeCompare(String(b.created)))
-                setHeldDeposits(data.map((d) => ({
-                    id: d.id,
-                    quantity: d.quantity || 0,
-                    refunded_qty: d.refunded_qty || 0,
-                    amount_per_crate: d.amount_per_crate || 0,
-                    total_amount: d.total_amount || 0,
-                    status: d.status,
-                    created: d.created,
-                })))
+                setHeldDeposits(await fetchHeldDeposits(selectedCustomer))
             } catch {
                 // Collection may not exist yet on older DBs — no refundable deposits
                 setHeldDeposits([])
             }
         }
-        fetchHeldDeposits()
+        fetchHeld()
     }, [selectedCustomer])
 
     const heldCrates = heldDeposits.reduce((sum, d) => sum + Math.max(0, d.quantity - d.refunded_qty), 0)
@@ -164,84 +166,92 @@ export default function CustomerReturnEmpties() {
         setReturnItems(returnItems.filter(item => item.id !== id))
     }
 
+    const payloadSignature = () => [
+        selectedCustomer,
+        date ? format(date, 'yyyy-MM-dd') : '',
+        returnItems.map((i) => `${i.productId}:${i.quantity}`).sort().join(','),
+        refundQty,
+        applyRefund,
+    ].join('|')
+
+    // Drop a stale partial record when the payload changes under a retained
+    // client_ref (never once money moved — void the entry instead).
+    useEffect(() => {
+        const attempt = attemptRef.current
+        if (!attempt) return
+        if (attempt.signature === payloadSignature()) return
+        attemptRef.current = null
+        ;(async () => {
+            try {
+                const log = await findReturnByRef(attempt.clientRef)
+                if (log && (log.refund_qty ?? 0) <= 0 && !log.yard_applied) {
+                    await pb.collection('empties_log').delete(log.id)
+                }
+            } catch {
+                // Best-effort cleanup — the key is already discarded.
+            }
+        })()
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedCustomer, date, returnItems, refundQty, applyRefund])
+
     const handleSubmit = async () => {
         if (!selectedCustomer || !date || returnItems.length === 0) {
             toast.error("Please fill in all required fields (Customer, Date, and at least one item).")
             return
         }
-
-        const totalQuantity = returnItems.reduce((sum, item) => sum + item.quantity, 0)
+        if (savingRef.current) return
+        savingRef.current = true
+        setSaving(true)
 
         try {
-            // 1. Insert into empties_log
-            const logData = await pb.collection('empties_log').create({
-                date: date.toISOString().split('T')[0],
-                customer_id: selectedCustomer,
-                activity: 'customer_empties_return',
-                total_quantity: totalQuantity
+            const signature = payloadSignature()
+            if (!attemptRef.current || attemptRef.current.signature !== signature) {
+                attemptRef.current = { clientRef: generateReturnRef(), signature }
+            }
+            const clientRef = attemptRef.current.clientRef
+
+            // Soft duplicate check: same customer/date/qty recorded recently
+            // under a different key — the session key can't catch this after
+            // a reload, so ask instead of blocking outright.
+            const totalQuantity = returnItems.reduce((sum, item) => sum + item.quantity, 0)
+            const duplicate = await findRecentDuplicateReturn({
+                customerId: selectedCustomer,
+                date: format(date, 'yyyy-MM-dd'),
+                totalQuantity,
+                excludeClientRef: clientRef,
+            }).catch(() => null)
+            if (
+                duplicate &&
+                !confirm(`A return of ${totalQuantity} crate(s) for ${currentCustomer?.name ?? "this customer"} was already recorded moments ago on this date. Record it again?`)
+            ) {
+                return
+            }
+
+            const result = await submitCustomerReturn({
+                clientRef,
+                customerId: selectedCustomer,
+                date: format(date, 'yyyy-MM-dd'),
+                items: returnItems.map((item) => ({
+                    productId: item.productId,
+                    quantity: item.quantity,
+                })),
+                refundQty,
+                refundMethod,
+                applyRefund,
             })
 
-            // 2. Insert into empties_log_detail
-            for (const item of returnItems) {
-                await pb.collection('empties_log_detail').create({
-                    log_id: logData.id,
-                    product_id: item.productId,
-                    quantity: item.quantity
-                })
-            }
+            // Success consumes this attempt's idempotency key.
+            attemptRef.current = null
 
-            // 3. Cash-out refundable crate deposits FIFO, proportional per crate.
-            // Crates are fungible across SKUs, so the oldest held deposit rows
-            // are refunded first at their frozen per-crate amounts.
-            let refundedCrates = 0
-            let refundedAmount = 0
-            let remaining = refundQty
-            if (remaining > 0) {
-                for (const dep of heldDeposits) {
-                    if (remaining <= 0) break
-                    const available = Math.max(0, dep.quantity - dep.refunded_qty)
-                    if (available <= 0) continue
-                    const alloc = Math.min(available, remaining)
-                    const newRefunded = dep.refunded_qty + alloc
-                    const fullyRefunded = newRefunded >= dep.quantity
-                    try {
-                        await pb.collection('crate_deposits').update(dep.id, {
-                            refunded_qty: newRefunded,
-                            status: fullyRefunded ? 'refunded' : 'partial',
-                            ...(fullyRefunded
-                                ? { refunded_at: new Date().toISOString(), refund_log_id: logData.id, refund_method: refundMethod }
-                                : {}),
-                        })
-                        refundedCrates += alloc
-                        refundedAmount += alloc * (dep.amount_per_crate || 0)
-                        remaining -= alloc
-                    } catch (refundError) {
-                        console.error("Failed to refund crate deposit row:", refundError)
-                        break
-                    }
-                }
+            if (result.yardFailed) {
+                toast.warning("Return recorded, but yard stock needs review — reconcile manually.")
             }
-
-            if (refundedCrates > 0) {
-                toast.success(`Return recorded! Refund GH₵ ${refundedAmount.toFixed(2)} in ${refundMethod.replace(/_/g, " ")} for ${refundedCrates} crate(s).`)
+            if (result.refundedCrates > 0) {
+                toast.success(`Return recorded! Refund GH₵ ${result.refundedAmount.toFixed(2)} in ${refundMethod.replace(/_/g, " ")} for ${result.refundedCrates} crate(s).`)
+            } else if (result.resumed) {
+                toast.success("Return completed (resumed a previous attempt).")
             } else {
                 toast.success("Return recorded successfully!")
-            }
-
-            // 4. Move yard stock: physical empties arrived (ground +) and left
-            // the trade pool (trade −, unclamped). Ledger above is the source
-            // of truth — a tally failure warns without rolling back.
-            try {
-                await moveYardStock(
-                    returnItems.map((item) => ({
-                        productId: item.productId,
-                        groundDelta: item.quantity,
-                        tradeDelta: -item.quantity,
-                    }))
-                )
-            } catch (yardError) {
-                console.error("Failed to update yard stock (return recorded):", yardError)
-                toast.warning("Return recorded, but yard stock needs review — reconcile manually.")
             }
 
             // Reset form
@@ -250,9 +260,12 @@ export default function CustomerReturnEmpties() {
             setReturnItems([])
             setHeldDeposits([])
             setApplyRefund(true)
-        } catch (error: any) {
+        } catch (error) {
             console.error("Error saving return:", error)
-            toast.error(error.message || "Failed to record return.")
+            toast.error(error instanceof Error ? error.message : "Failed to record return.")
+        } finally {
+            savingRef.current = false
+            setSaving(false)
         }
     }
 
@@ -437,8 +450,8 @@ export default function CustomerReturnEmpties() {
             )}
 
             <div className="flex justify-end">
-                <Button size="lg" onClick={handleSubmit} disabled={returnItems.length === 0}>
-                    Save Return Record{refundQty > 0 ? ` + Refund ${refundQty} crate(s)` : ""}
+                <Button size="lg" onClick={handleSubmit} disabled={returnItems.length === 0 || saving}>
+                    {saving ? "Saving..." : `Save Return Record${refundQty > 0 ? ` + Refund ${refundQty} crate(s)` : ""}`}
                 </Button>
             </div>
         </div>

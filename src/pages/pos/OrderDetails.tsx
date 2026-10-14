@@ -417,6 +417,7 @@ export default function OrderDetails() {
                         customer_id: order.customer_id,
                         activity: 'customer_empties_return',
                         total_quantity: returnQty,
+                        source: 'pos',
                     }).then(async (logData) => {
                         await pb.collection('empties_log_detail').create({
                             log_id: logData.id,

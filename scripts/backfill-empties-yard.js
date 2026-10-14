@@ -66,7 +66,7 @@ async function main() {
     await pb.collection('_superusers').authWithPassword(SUPERUSER_EMAIL, SUPERUSER_PASSWORD);
 
     const [headers, details, customers, takes, takeItems, currentRows, products] = await Promise.all([
-        pb.collection('empties_log').getFullList({ fields: 'id, customer_id, activity, total_quantity' }),
+        pb.collection('empties_log').getFullList({ filter: 'voided_at = ""', fields: 'id, customer_id, activity, total_quantity' }),
         pb.collection('empties_log_detail').getFullList({ fields: 'log_id, product_id, quantity' }),
         pb.collection('customers').getFullList({ fields: 'id, balance, deleted_at' }),
         pb.collection('empties_count_takes').getFullList({ fields: 'id, date' }).catch(() => []),

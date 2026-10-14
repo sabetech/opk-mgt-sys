@@ -129,6 +129,13 @@ function fld(type, name, opts = {}) {
 }
 
 const AUTH_RULE = '@request.auth.id != ""';
+
+// PocketBase stores text zero-values as '' (never NULL), so a plain UNIQUE
+// index on empties_log.client_ref would collide across every non-idempotent
+// flow. Mirror PocketBase's own pattern (users.email) with a partial unique
+// index: uniqueness only for non-empty keys.
+const CLIENT_REF_PARTIAL_UNIQUE_INDEX =
+    "CREATE UNIQUE INDEX `idx_client_ref__empties_log` ON `empties_log` (`client_ref`) WHERE `client_ref` != ''";
 const ADMIN_RULE = '@request.auth.role = "admin"';
 
 // ---------------------------------------------------------------------------
@@ -172,7 +179,7 @@ async function wipeCollectionData(name) {
     }
 }
 
-async function ensureCollection(name, type, fields, rules = {}, force = false) {
+async function ensureCollection(name, type, fields, rules = {}, force = false, indexes = []) {
     const existing = (await pb.collections.getFullList()).find((c) => c.name === name);
 
     if (existing && force) {
@@ -196,7 +203,7 @@ async function ensureCollection(name, type, fields, rules = {}, force = false) {
         createRule: rules.createRule ?? AUTH_RULE,
         updateRule: rules.updateRule ?? AUTH_RULE,
         deleteRule: rules.deleteRule ?? AUTH_RULE,
-        indexes: [],
+        indexes,
     });
     console.log(`  [ok] created collection "${name}"`);
 }
@@ -300,7 +307,20 @@ async function main() {
     }
 
     console.log(`Connecting to PocketBase at ${PB_URL}...`);
-    await pb.admins.authWithPassword(SUPERUSER_EMAIL, SUPERUSER_PASSWORD);
+    // PocketBase >= 0.23 replaced the admins API with the superusers auth
+    // collection (named `_superusers` in newer releases, `$superusers` in
+    // older ones); fall back to the legacy endpoint on very old servers.
+    let authed = false;
+    for (const name of ['_superusers', '$superusers']) {
+        try {
+            await pb.collection(name).authWithPassword(SUPERUSER_EMAIL, SUPERUSER_PASSWORD);
+            authed = true;
+            break;
+        } catch (err) {
+            if (err?.status !== 404) throw err; // wrong credentials, not a missing route
+        }
+    }
+    if (!authed) await pb.admins.authWithPassword(SUPERUSER_EMAIL, SUPERUSER_PASSWORD);
     console.log('Superuser authenticated.');
 
     console.log('\n[1/4] Creating collections...');
@@ -394,14 +414,14 @@ async function main() {
         fld('date', 'expiry_date'),
     ], {}, flags.force);
 
-    const { customers, warehouse_stock, inventory_logs } = await getCollectionsMap();
+    const { customers, warehouse_stock, inventory_logs, users } = await getCollectionsMap();
 
     await ensureCollection('empties_log', 'base', [
         fld('date', 'date', { required: true }),
         fld('number', 'total_quantity', { required: true }),
         fld('select', 'activity', {
             required: true,
-            values: ['customer_empties_return', 'empties_to_supplier', 'customer_purchase'],
+            values: ['customer_empties_return', 'empties_to_supplier', 'customer_purchase', 'customer_empties_reclaim'],
         }),
         fld('relation', 'customer_id', { collectionId: customers.id, maxSelect: 1 }),
         fld('text', 'vehicle_no'),
@@ -410,7 +430,26 @@ async function main() {
         fld('number', 'num_of_pcs'),
         fld('number', 'deposit_qty'),
         fld('number', 'deposit_total'),
-    ], {}, flags.force);
+        // Idempotency key for customer empties returns: one logical
+        // submission = one client_ref. Other flows omit it, and PocketBase
+        // stores text zero-values as '' (never NULL), so a plain UNIQUE
+        // column would collide on '' across every other flow — uniqueness
+        // is enforced via a partial index below (WHERE client_ref != '')
+        // instead of field-level `unique`. refund_* track FIFO refund
+        // progress so a retried submission resumes instead of
+        // double-refunding; yard_applied flags the stock tally as done.
+        fld('text', 'client_ref'),
+        fld('number', 'refund_qty'),
+        fld('number', 'refund_amount'),
+        fld('bool', 'yard_applied'),
+        // Writer attribution: only 'return_page' entries are voidable.
+        // Void fields keep the row for audit while excluding it from
+        // balances, reports, and the yard position (emptiesVoid.ts).
+        fld('text', 'source'),
+        fld('date', 'voided_at'),
+        fld('text', 'void_reason'),
+        fld('relation', 'voided_by', { collectionId: users.id, maxSelect: 1 }),
+    ], {}, flags.force, [CLIENT_REF_PARTIAL_UNIQUE_INDEX]);
 
     await ensureCollection('orders', 'base', [
         fld('relation', 'customer_id', { collectionId: customers.id, maxSelect: 1 }),
@@ -512,7 +551,7 @@ async function main() {
         fld('text', 'reason'),
     ], {}, flags.force);
 
-    const { users, orders: ordersForFieldSales } = await getCollectionsMap();
+    const { orders: ordersForFieldSales } = await getCollectionsMap();
 
     // VSE field sales (recorded in the field by VSE logins, dual approval).
     // sale_status is approved by account_manager, empties_status by
@@ -728,14 +767,42 @@ async function main() {
         const extraFields = [];
         if (!existingFieldNames.includes('deposit_qty')) extraFields.push(fld('number', 'deposit_qty'));
         if (!existingFieldNames.includes('deposit_total')) extraFields.push(fld('number', 'deposit_total'));
-        if (extraFields.length > 0) {
+        if (!existingFieldNames.includes('client_ref')) extraFields.push(fld('text', 'client_ref'));
+        if (!existingFieldNames.includes('refund_qty')) extraFields.push(fld('number', 'refund_qty'));
+        if (!existingFieldNames.includes('refund_amount')) extraFields.push(fld('number', 'refund_amount'));
+        if (!existingFieldNames.includes('yard_applied')) extraFields.push(fld('bool', 'yard_applied'));
+        if (!existingFieldNames.includes('source')) extraFields.push(fld('text', 'source'));
+        if (!existingFieldNames.includes('voided_at')) extraFields.push(fld('date', 'voided_at'));
+        if (!existingFieldNames.includes('void_reason')) extraFields.push(fld('text', 'void_reason'));
+        if (!existingFieldNames.includes('voided_by')) extraFields.push(fld('relation', 'voided_by', { collectionId: users.id, maxSelect: 1 }));
+        // Uniqueness must be enforced by the partial index, not field-level
+        // `unique` (which would create a full unique index and break every
+        // flow that omits client_ref, since PocketBase stores '' not NULL).
+        const normalizedFields = emptiesLogCol.fields.map((f) =>
+            f.name === 'client_ref' && f.unique ? { ...f, unique: false } : f,
+        );
+        const lostFieldLevelUnique = normalizedFields.some((f, i) => f !== emptiesLogCol.fields[i]);
+        const existingIndexes = emptiesLogCol.indexes || [];
+        const nextIndexes = [
+            ...existingIndexes.filter((i) => !i.includes('client_ref')),
+            CLIENT_REF_PARTIAL_UNIQUE_INDEX,
+        ];
+        const indexChanged =
+            nextIndexes.length !== existingIndexes.length ||
+            nextIndexes.some((i, idx) => i !== existingIndexes[idx]);
+        if (extraFields.length > 0 || lostFieldLevelUnique || indexChanged) {
             if (!flags.dryRun) {
                 await pb.collections.update(emptiesLogCol.id, {
-                    fields: [...emptiesLogCol.fields, ...extraFields],
+                    fields: [...normalizedFields, ...extraFields],
+                    indexes: nextIndexes,
                 });
-                console.log(`  [ok] added ${extraFields.length} missing field(s) to empties_log`);
+                const parts = [];
+                if (extraFields.length > 0) parts.push(`${extraFields.length} missing field(s)`);
+                if (lostFieldLevelUnique) parts.push('field-level unique on client_ref');
+                if (indexChanged) parts.push('client_ref partial unique index');
+                console.log(`  [ok] updated empties_log: ${parts.join(', ')}`);
             } else {
-                console.log(`  [dry-run] would add ${extraFields.length} field(s) to empties_log`);
+                console.log(`  [dry-run] would update empties_log (${extraFields.length} field(s), partial unique index on client_ref)`);
             }
         }
     }
@@ -790,6 +857,29 @@ async function main() {
                     console.log('  [ok] added opening_balance to empties_log activity options');
                 } else {
                     console.log('  [dry-run] would add opening_balance to empties_log activity options');
+                }
+            }
+        }
+    }
+
+    // Allow customer_empties_reclaim activity on empties_log (empties handed
+    // back to a customer against their balance — Return Customer Empties page).
+    {
+        const cols = await pb.collections.getFullList();
+        const logCol = cols.find((c) => c.name === 'empties_log');
+        if (logCol) {
+            const activity = logCol.fields.find((f) => f.name === 'activity');
+            const values = [...(activity?.values || [])];
+            if (!values.includes('customer_empties_reclaim')) {
+                values.push('customer_empties_reclaim');
+                if (!flags.dryRun) {
+                    const fields = logCol.fields.map((f) =>
+                        f.name === 'activity' ? { ...f, values } : f
+                    );
+                    await pb.collections.update(logCol.id, { fields });
+                    console.log('  [ok] added customer_empties_reclaim to empties_log activity options');
+                } else {
+                    console.log('  [dry-run] would add customer_empties_reclaim to empties_log activity options');
                 }
             }
         }

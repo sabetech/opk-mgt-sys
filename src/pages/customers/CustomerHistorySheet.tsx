@@ -16,13 +16,29 @@ import {
     TrendingUp,
     Calendar,
     Package,
-    Minus
+    Minus,
+    Ban
 } from "lucide-react"
 import { pb } from "@/lib/pocketbase"
 import { format } from "date-fns"
 import { cn } from "@/lib/utils"
 import { emptiesActivityEffect } from "@/lib/customerBalance"
 import { fetchEmptiesDisplayMode, formatEmptiesBalance, type EmptiesDisplayMode } from "@/lib/emptiesDisplay"
+import { voidEmptiesReturn, VoidBlockedError } from "@/lib/emptiesVoid"
+import { useAuth } from "@/context/AuthContext"
+import { toast } from "sonner"
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog"
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 
 interface CustomerHistorySheetProps {
     customer: {
@@ -42,14 +58,31 @@ type TimelineEntry = {
     quantity: number
     status?: string
     details: any[]
+    /** empties_log id — present on ledger-backed entries. */
+    logId?: string
+    /** Writer attribution ('return_page' | 'pos' | 'order_cancel' | 'reclaim'). */
+    source?: string | null
+    /** Voided ledger rows stay visible for audit but move no balances. */
+    voided?: boolean
+    voidReason?: string | null
 }
 
 export default function CustomerHistorySheet({ customer, open, onOpenChange }: CustomerHistorySheetProps) {
+    const { profile } = useAuth()
     const [loading, setLoading] = useState(false)
     const [timeline, setTimeline] = useState<TimelineEntry[]>([])
     const [netBalance, setNetBalance] = useState<number | null>(null)
     const [emptiesMode, setEmptiesMode] = useState<EmptiesDisplayMode>("debit")
     const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
+
+    // Void dialog state
+    const [voidTarget, setVoidTarget] = useState<TimelineEntry | null>(null)
+    const [voidReason, setVoidReason] = useState("")
+    const [voiding, setVoiding] = useState(false)
+
+    const canVoidRole = profile?.role === "admin" || profile?.role === "empties_manager"
+    const canVoidEntry = (entry: TimelineEntry) =>
+        canVoidRole && entry.type === "return" && entry.source === "return_page" && !entry.voided
 
     useEffect(() => {
         if (open && customer) {
@@ -88,11 +121,12 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                 ;(salesByOrder[sale.order_id] = salesByOrder[sale.order_id] || []).push(shaped)
             }
 
-            // 3. Fetch Empties Logs
+            // 3. Fetch Empties Logs (voided rows stay visible for audit but
+            // must not feed the net balance below)
             const empties = await pb.collection('empties_log').getFullList({
                 filter: `customer_id = "${customer.id}"`,
                 sort: '-date',
-                fields: 'id, date, activity, total_quantity'
+                fields: 'id, date, created, activity, total_quantity, source, voided_at, void_reason'
             })
 
             // 4. Fetch empties log details (with product names)
@@ -138,13 +172,21 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
             empties?.forEach(log => {
                 const isReturn = log.activity === 'customer_empties_return'
                 const isOpening = log.activity === 'opening_balance'
+                const isReclaim = log.activity === 'customer_empties_reclaim'
                 entries.push({
                     id: `empty-${log.id}`,
                     date: log.created || log.date, // Use created for time sorting
                     type: isOpening ? 'opening' : isReturn ? 'return' : 'purchase',
-                    description: isOpening ? 'Opening Balance' : isReturn ? 'Empties Return' : `Empties for Sale`,
+                    description: isOpening ? 'Opening Balance'
+                        : isReturn ? 'Empties Return'
+                        : isReclaim ? 'Empties Returned to Customer'
+                        : `Empties for Sale`,
                     quantity: log.total_quantity,
-                    details: detailsByLog[log.id] || []
+                    details: detailsByLog[log.id] || [],
+                    logId: log.id,
+                    source: log.source,
+                    voided: !!log.voided_at,
+                    voidReason: log.void_reason || null
                 })
             })
 
@@ -163,7 +205,9 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                 opening +
                 (empties || []).reduce(
                     (sum: number, log) =>
-                        sum + emptiesActivityEffect(log.activity) * (log.total_quantity || 0),
+                        log.voided_at
+                            ? sum
+                            : sum + emptiesActivityEffect(log.activity) * (log.total_quantity || 0),
                     0
                 )
             )
@@ -180,6 +224,40 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
         if (newExpanded.has(id)) newExpanded.delete(id)
         else newExpanded.add(id)
         setExpandedEntries(newExpanded)
+    }
+
+    const openVoidDialog = (entry: TimelineEntry) => {
+        setVoidTarget(entry)
+        setVoidReason("")
+    }
+
+    const handleVoid = async () => {
+        if (!voidTarget?.logId || !profile) return
+        const reason = voidReason.trim()
+        if (!reason) {
+            toast.error("A reason is required to void a return.")
+            return
+        }
+        setVoiding(true)
+        try {
+            const summary = await voidEmptiesReturn(voidTarget.logId, { reason, userId: profile.id })
+            toast.success(`Return voided — customer balance reduced by ${Math.abs(summary.balanceDelta)} crate(s).`)
+            if (!summary.yardApplied) {
+                toast.warning("Return voided, but yard stock needs review — reconcile manually.")
+            }
+            setVoidTarget(null)
+            setVoidReason("")
+            fetchHistory()
+        } catch (error) {
+            console.error("Failed to void return:", error)
+            toast.error(
+                error instanceof VoidBlockedError
+                    ? error.message
+                    : error instanceof Error ? error.message : "Failed to void return."
+            )
+        } finally {
+            setVoiding(false)
+        }
     }
 
     return (
@@ -243,7 +321,14 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                                 {entry.type === 'purchase' ? <ShoppingCart className="h-5 w-5" /> : entry.type === 'opening' ? <Package className="h-5 w-5" /> : <RefreshCcw className="h-5 w-5" />}
                                             </div>
                                             <div>
-                                                <p className="font-bold text-sm">{entry.description}</p>
+                                                <p className={cn("font-bold text-sm flex items-center gap-2", entry.voided && "text-muted-foreground")}>
+                                                    {entry.description}
+                                                    {entry.voided && (
+                                                        <Badge variant="outline" className="text-[10px] font-semibold text-muted-foreground border-muted-foreground/30">
+                                                            Voided
+                                                        </Badge>
+                                                    )}
+                                                </p>
                                                 <p className="text-xs text-muted-foreground">
                                                     {entry.date ? format(new Date(entry.date), 'MMM dd, yyyy • hh:mm a') : 'No date'}
                                                 </p>
@@ -265,7 +350,8 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                                     )}
                                                     <span className={cn(
                                                         "text-xs font-bold",
-                                                        entry.type === 'purchase' ? "text-red-600" : entry.type === 'opening' ? "text-muted-foreground" : "text-green-600"
+                                                        entry.voided ? "text-muted-foreground line-through" :
+                                                            entry.type === 'purchase' ? "text-red-600" : entry.type === 'opening' ? "text-muted-foreground" : "text-green-600"
                                                     )}>
                                                         {entry.type === 'opening' ? `${entry.quantity} Crates` : `${entry.type === 'purchase' ? '-' : '+'}${entry.quantity} Crates`}
                                                     </span>
@@ -292,6 +378,24 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                                                         </div>
                                                     ))}
                                                 </div>
+                                                {entry.voided && entry.voidReason && (
+                                                    <p className="mt-3 text-xs text-muted-foreground italic">
+                                                        Voided: {entry.voidReason}
+                                                    </p>
+                                                )}
+                                                {canVoidEntry(entry) && (
+                                                    <div className="mt-3">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:hover:bg-red-900/20"
+                                                            onClick={() => openVoidDialog(entry)}
+                                                        >
+                                                            <Ban className="h-3.5 w-3.5 mr-1.5" />
+                                                            Void Return
+                                                        </Button>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     )}
@@ -307,6 +411,56 @@ export default function CustomerHistorySheet({ customer, open, onOpenChange }: C
                         </div>
                     )}
                 </div>
+
+                <Dialog open={!!voidTarget} onOpenChange={(isOpen) => {
+                    if (!isOpen && !voiding) {
+                        setVoidTarget(null)
+                        setVoidReason("")
+                    }
+                }}>
+                    <DialogContent className="sm:max-w-[440px]">
+                        <DialogHeader>
+                            <DialogTitle>Void empties return</DialogTitle>
+                            <DialogDescription>
+                                This return credited <span className="font-semibold text-foreground">{voidTarget?.quantity} crate(s)</span> to {customer?.name}.
+                                Voiding removes them from the customer's balance and reverses the yard tally (ground −{voidTarget?.quantity}, trade +{voidTarget?.quantity}).
+                                The entry stays in history marked as voided.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-2 py-2">
+                            <Label htmlFor="void-reason">Reason</Label>
+                            <Input
+                                id="void-reason"
+                                value={voidReason}
+                                onChange={(e) => setVoidReason(e.target.value)}
+                                placeholder="e.g. Recorded against the wrong customer"
+                                disabled={voiding}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                                Returns with a paid crate-deposit refund cannot be voided.
+                            </p>
+                        </div>
+                        <DialogFooter>
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    setVoidTarget(null)
+                                    setVoidReason("")
+                                }}
+                                disabled={voiding}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="destructive"
+                                onClick={handleVoid}
+                                disabled={voiding || !voidReason.trim()}
+                            >
+                                {voiding ? "Voiding..." : "Void Return"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </SheetContent>
         </Sheet>
     )

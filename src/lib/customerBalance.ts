@@ -2,7 +2,7 @@ import { getFullListInBatches } from "./pocketbase";
 export interface CustomerBalance {
     /** Stored opening balance (customers.balance) — set at creation/import. */
     opening: number;
-    /** Net empties_log movement: returns (+) minus purchases (−). */
+    /** Net empties_log movement: returns (+) minus purchases/reclaims (−). */
     ledger: number;
     /** Live crates balance: opening + ledger. */
     balance: number;
@@ -15,6 +15,8 @@ export interface CustomerBalance {
 export function emptiesActivityEffect(activity: string): 1 | -1 | 0 {
     if (activity === 'customer_empties_return') return 1
     if (activity === 'opening_balance') return 0
+    // customer_purchase, customer_empties_reclaim, empties_to_supplier, and
+    // any unknown activity all debit the balance.
     return -1
 }
 
@@ -23,11 +25,12 @@ export function emptiesActivityEffect(activity: string): 1 | -1 | 0 {
  *
  * `customers.balance` is only ever an *opening* figure — no checkout, return
  * or cancellation flow writes it. The live position lives in `empties_log`
- * (`customer_purchase` debits returnable crates, `customer_empties_return`
- * credits them back), so every display of a customer's balance must go
- * through here instead of reading the stored field directly.
+ * (`customer_purchase` and `customer_empties_reclaim` debit returnable
+ * crates, `customer_empties_return` credits them back), so every display of
+ * a customer's balance must go through here instead of reading the stored
+ * field directly.
  *
- * INVARIANT: only the two activities above move the ledger. Detail-only
+ * INVARIANT: only the three activities above move the ledger. Detail-only
  * rows such as `opening_balance` (per-product opening breakdown written at
  * customer creation — the opening itself lives in customers.balance) and
  * `empties_to_supplier` are ignored, otherwise the opening would count twice.
@@ -44,15 +47,17 @@ export async function fetchCustomerBalances(
     if (ids.length === 0) return result;
 
     // Chunked fan-out: one giant `||` filter exceeds URL limits behind proxies.
+    // Voided returns stay on the ledger for audit but must not move balances.
     const logs = await getFullListInBatches("empties_log", "customer_id", ids, {
         fields: "customer_id, activity, total_quantity",
+        filter: 'voided_at = ""',
     });
     for (const log of logs) {
         const entry = result[log.customer_id];
         if (!entry) continue;
         if (log.activity === "customer_empties_return") {
             entry.ledger += log.total_quantity || 0;
-        } else if (log.activity === "customer_purchase") {
+        } else if (log.activity === "customer_purchase" || log.activity === "customer_empties_reclaim") {
             entry.ledger -= log.total_quantity || 0;
         }
     }

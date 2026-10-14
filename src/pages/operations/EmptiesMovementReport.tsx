@@ -78,9 +78,11 @@ export default function EmptiesMovementReport() {
         try {
             const range = rangeFilter(fromDate, toDate)
 
-            // 1. Empties logs (customer in/out, GGBL, openings) + actors
+            // 1. Empties logs (customer in/out, GGBL, openings) + actors.
+            // Voided returns are excluded so movement rows and ground
+            // reconstruction match the live yard tally.
             const logs = await pb.collection("empties_log").getFullList({
-                filter: range,
+                filter: `(${range}) && voided_at = ""`,
                 expand: "customer_id",
                 $autoCancel: false,
             })
@@ -106,6 +108,10 @@ export default function EmptiesMovementReport() {
                 const header = d.log_id ? logById.get(String(d.log_id)) : undefined
                 if (header?.activity === "customer_empties_return" && pid) {
                     returnsSinceFrom[pid] = (returnsSinceFrom[pid] || 0) + (d.quantity || 0)
+                } else if (header?.activity === "customer_empties_reclaim" && pid) {
+                    // Reclaims also move ground (out of the yard) — net them
+                    // against returns so ground reconstruction stays correct.
+                    returnsSinceFrom[pid] = (returnsSinceFrom[pid] || 0) - (d.quantity || 0)
                 }
             }
 
@@ -135,7 +141,7 @@ export default function EmptiesMovementReport() {
                 const actor = customer?.name || "—"
                 if (l.activity === "customer_empties_return") {
                     byActivity.in.push(shapeLog(l, actor))
-                } else if (l.activity === "customer_purchase") {
+                } else if (l.activity === "customer_purchase" || l.activity === "customer_empties_reclaim") {
                     byActivity.out.push(shapeLog(l, actor))
                 } else if (l.activity === "empties_to_supplier") {
                     const meta = [l.vehicle_no ? `Vehicle ${l.vehicle_no}` : "", l.returned_by ? `by ${l.returned_by}` : ""]
@@ -197,17 +203,18 @@ export default function EmptiesMovementReport() {
             })
 
             // 4. Ground positions: opening/closing on-ground qty per product,
-            // reconstructed from the live tally minus returns since. Ground
-            // moves only on customer returns, so backing those out of live
-            // ground recovers both period boundaries.
+            // reconstructed from the live tally minus net inflows since.
+            // Ground moves on customer returns (+) and reclaims handed back
+            // to customers (−), so both are backed out of live ground to
+            // recover both period boundaries.
             const toStr = format(toDate, "yyyy-MM-dd")
             const fromStr = format(fromDate, "yyyy-MM-dd")
             const todayStr = format(new Date(), "yyyy-MM-dd")
             const returnsAfterTo: Record<string, number> = {}
             if (format(addDays(toDate, 1), "yyyy-MM-dd") <= todayStr) {
                 const laterLogs = await pb.collection("empties_log").getFullList({
-                    filter: `activity = "customer_empties_return" && date >= "${format(addDays(toDate, 1), "yyyy-MM-dd")}"`,
-                    fields: "id",
+                    filter: `(activity = "customer_empties_return" || activity = "customer_empties_reclaim") && date >= "${format(addDays(toDate, 1), "yyyy-MM-dd")}" && voided_at = ""`,
+                    fields: "id, activity",
                     $autoCancel: false,
                 })
                 const laterIds = laterLogs.map((l) => l.id)
@@ -215,10 +222,12 @@ export default function EmptiesMovementReport() {
                     const laterDetails = await getFullListInBatches("empties_log_detail", "log_id", laterIds, {
                         expand: "product_id",
                     })
+                    const activityByLog = new Map(laterLogs.map((l) => [String(l.id), String(l.activity)]))
                     for (const d of laterDetails) {
                         const pid = typeof d.product_id === "string" ? d.product_id : ""
                         if (!pid) continue
-                        returnsAfterTo[pid] = (returnsAfterTo[pid] || 0) + (d.quantity || 0)
+                        const sign = activityByLog.get(String(d.log_id)) === "customer_empties_reclaim" ? -1 : 1
+                        returnsAfterTo[pid] = (returnsAfterTo[pid] || 0) + sign * (d.quantity || 0)
                         const rel = d.expand?.product_id
                         if (!productNames[pid]) productNames[pid] = rel?.sku_name || "Unknown"
                     }

@@ -25,9 +25,11 @@ export interface GroundPosition {
 
 /**
  * Reconstructs on-ground positions for a period from the live tally.
- * Ground moves ONLY on customer returns (+qty each), so:
- *   opening(from) = live − returns on/after from
- *   closing(to)   = live − returns after to
+ * Ground moves on customer returns (+qty) and on reclaims handed back to
+ * customers (−qty), so callers must pass NET inflows (returns minus
+ * reclaims). Then:
+ *   opening(from) = live − net inflow on/after from
+ *   closing(to)   = live − net inflow after to
  * (One-off baseline corrections, e.g. the backfill, predate the movement
  * history and are not backed out — positions before such a correction are
  * approximate.)

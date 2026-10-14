@@ -92,6 +92,7 @@ export function AppSidebar({ className }: SidebarProps) {
                 { title: "Add Customer", href: "/dashboard/customers/add", roles: ["admin", "empties_manager", "sales_manager"] },
                 { title: "All Customers", href: "/dashboard/customers/all", roles: ["admin", "empties_manager", "sales_manager", "auditor"] },
                 { title: "Return Empty Crates", href: "/dashboard/customers/return-crates", roles: ["admin", "empties_manager", "sales_manager"] },
+                { title: "Return Customer Empties", href: "/dashboard/customers/return-customer-empties", roles: ["admin", "empties_manager", "sales_manager"] },
             ],
         },
         {
