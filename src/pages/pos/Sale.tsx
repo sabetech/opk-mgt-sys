@@ -107,6 +107,9 @@ export default function Sale() {
     const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
     const [quantity, setQuantity] = useState<number>(1)
     const [paymentType, setPaymentType] = useState<string>("cash")
+    // Manual unit-price override ("" = use resolved default). Lets cashiers
+    // apply on-the-fly discounts/surcharges per line at the counter.
+    const [unitPriceInput, setUnitPriceInput] = useState<string>("")
 
     // UI helpers
     const [customerPopoverOpen, setCustomerPopoverOpen] = useState(false)
@@ -267,10 +270,11 @@ export default function Sale() {
         fetchInitialData()
     }, [])
 
-    // Reset surcharge/discount when product or customer changes
+    // Reset surcharge/discount/custom price when product or customer changes
     useEffect(() => {
         setApplySurcharge(false)
         setApplyDiscount(false)
+        setUnitPriceInput("")
     }, [selectedProduct, selectedCustomer])
 
     const getUnitPrice = (product: Product) => {
@@ -305,7 +309,11 @@ export default function Sale() {
         surchargeConfig.product_ids.includes(selectedProduct?.id || "") &&
         surchargeConfig.amount > 0
 
-    const currentUnitPrice = selectedProduct ? getUnitPrice(selectedProduct) : 0
+    const defaultUnitPrice = selectedProduct ? getUnitPrice(selectedProduct) : 0
+    const parsedOverride = parseFloat(unitPriceInput)
+    const currentUnitPrice = unitPriceInput !== "" && !Number.isNaN(parsedOverride)
+        ? Math.max(0, parsedOverride)
+        : defaultUnitPrice
     const currentSurcharge = (applySurcharge && isSurchargeApplicable) ? surchargeConfig.amount : 0
     const currentDiscount = (applyDiscount && isDiscountApplicable)
         ? Math.min(discountConfig.amount, currentUnitPrice)
@@ -794,8 +802,27 @@ export default function Sale() {
                             {selectedProduct && (
                                 <div className="bg-muted/30 p-4 rounded-lg animate-in fade-in slide-in-from-top-1 px-4 py-3 flex flex-wrap items-end gap-6 border border-dashed">
                                     <div className="space-y-1">
-                                        <span className="text-xs font-semibold text-muted-foreground uppercase">Unit Price</span>
-                                        <div className="text-lg font-bold">GH₵ {currentUnitPrice.toFixed(2)}</div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-xs font-semibold text-muted-foreground uppercase">Unit Price</span>
+                                            {currentUnitPrice !== defaultUnitPrice && (
+                                                <span className="text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded dark:bg-amber-900/40 dark:text-amber-300">
+                                                    Custom
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="relative">
+                                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-muted-foreground pointer-events-none">
+                                                GH₵
+                                            </span>
+                                            <Input
+                                                type="number"
+                                                min="0"
+                                                step="0.01"
+                                                value={unitPriceInput === "" ? defaultUnitPrice.toFixed(2) : unitPriceInput}
+                                                onChange={(e) => setUnitPriceInput(e.target.value)}
+                                                className="h-9 pl-10 text-lg font-bold"
+                                            />
+                                        </div>
                                     </div>
 
                                     <div className="space-y-1 w-24">
