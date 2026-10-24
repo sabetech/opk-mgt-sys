@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react"
 import { format } from "date-fns"
-import { Calendar as CalendarIcon, ChevronDown, ChevronRight, Package, Loader2, Maximize2, FileText } from "lucide-react"
+import { Calendar as CalendarIcon, ChevronDown, ChevronRight, Package, Loader2, Maximize2, FileText, Download } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { DatePicker } from "@/components/ui/date-picker"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import type { RangeKeyDict, Range } from "react-date-range"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -20,6 +22,7 @@ import {
     DialogContent,
     DialogHeader,
     DialogTitle,
+    DialogFooter,
 } from "@/components/ui/dialog"
 import { pb, getFullListInBatches } from "@/lib/pocketbase"
 import { poImageUrl } from "@/lib/poImage"
@@ -65,6 +68,12 @@ export default function StocksComingInLog() {
 
     const [viewerImage, setViewerImage] = useState<string | null>(null)
     const [isViewerOpen, setIsViewerOpen] = useState(false)
+
+    // CSV export modal (date range)
+    const [exportOpen, setExportOpen] = useState(false)
+    const [exportRange, setExportRange] = useState<Range[]>([
+        { startDate: new Date(), endDate: new Date(), key: "selection" },
+    ])
 
     useEffect(() => {
         fetchReceivables()
@@ -127,6 +136,87 @@ export default function StocksComingInLog() {
     const openViewer = (url: string) => {
         setViewerImage(url)
         setIsViewerOpen(true)
+    }
+
+    const csvEscape = (value: string | number | null | undefined): string => {
+        const s = value === null || value === undefined ? "" : String(value)
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+
+    const openExportDialog = () => {
+        setExportRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }])
+        setExportOpen(true)
+    }
+
+    const handleExportCsv = () => {
+        const start = exportRange[0]?.startDate
+        const end = exportRange[0]?.endDate
+        if (!start || !end) {
+            toast.error("Please select a start and end date.")
+            return
+        }
+
+        const rangeStart = new Date(start)
+        rangeStart.setHours(0, 0, 0, 0)
+        const rangeEnd = new Date(end)
+        rangeEnd.setHours(23, 59, 59, 999)
+
+        const inRange = receivables.filter((r) => {
+            const d = new Date(r.date)
+            return d >= rangeStart && d <= rangeEnd
+        })
+
+        if (inRange.length === 0) {
+            toast.error("No records in the selected date range.")
+            return
+        }
+
+        const headers = [
+            "Date",
+            "PO Number",
+            "Product",
+            "Batch No",
+            "Expiry Date",
+            "Qty",
+            "Received By",
+            "Delivered By",
+            "Vehicle",
+        ]
+        const csvRows: (string | number)[][] = []
+        for (const r of inRange) {
+            const base = [
+                format(new Date(r.date), "yyyy-MM-dd"),
+                r.purchase_order_number,
+            ]
+            const tail = [r.received_by, r.delivered_by, r.vehicle_no]
+            if (r.inventory_receivable_items.length === 0) {
+                csvRows.push([...base, "", "", "", "", ...tail])
+            } else {
+                for (const item of r.inventory_receivable_items) {
+                    csvRows.push([
+                        ...base,
+                        item.products?.sku_name || "Unknown Product",
+                        item.batch_number || "",
+                        item.expiry_date ? format(new Date(item.expiry_date), "yyyy-MM-dd") : "",
+                        item.qty,
+                        ...tail,
+                    ])
+                }
+            }
+        }
+
+        const csv = [headers, ...csvRows]
+            .map((row) => row.map(csvEscape).join(","))
+            .join("\n")
+        const blob = new Blob([csv], { type: "text/csv" })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `stocks-coming-in-log-${format(rangeStart, "yyyy-MM-dd")}-to-${format(rangeEnd, "yyyy-MM-dd")}.csv`
+        a.click()
+        URL.revokeObjectURL(url)
+        setExportOpen(false)
+        toast.success(`Exported ${csvRows.length} row(s).`)
     }
 
     const dateFiltered = date
@@ -230,6 +320,12 @@ export default function StocksComingInLog() {
                             </select>
                         </div>
                     )}
+                </div>
+
+                <div className="flex sm:ml-auto">
+                    <Button variant="outline" onClick={openExportDialog} className="gap-2">
+                        <Download className="h-4 w-4" /> Export CSV
+                    </Button>
                 </div>
 
                 {poSummaries.length > 0 && (
@@ -396,6 +492,38 @@ export default function StocksComingInLog() {
                             />
                         )}
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Export CSV (date range) */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Download className="h-5 w-5" />
+                            Export Stocks Coming In Log
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <span className="text-sm font-medium">Date Range</span>
+                        <DateRangePicker
+                            value={exportRange}
+                            onChange={(ranges: RangeKeyDict) => {
+                                const selection = ranges.selection
+                                if (selection?.startDate && selection?.endDate) {
+                                    setExportRange([selection])
+                                }
+                            }}
+                        />
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button variant="outline" onClick={() => setExportOpen(false)}>
+                            Cancel
+                        </Button>
+                        <Button onClick={handleExportCsv} className="bg-amber-700 hover:bg-amber-800 gap-2">
+                            <Download className="h-4 w-4" /> Export CSV
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Calendar as CalendarIcon, ChevronDown, ChevronUp, Loader2, Package } from "lucide-react"
+import { Calendar as CalendarIcon, ChevronDown, ChevronUp, Loader2, Package, Download } from "lucide-react"
 import { format } from "date-fns"
 
 import { cn } from "@/lib/utils"
@@ -18,8 +18,17 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table"
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from "@/components/ui/dialog"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import type { RangeKeyDict, Range } from "react-date-range"
 import { Calendar } from "@/components/ui/calendar"
-import { pb, dayFilter } from "@/lib/pocketbase"
+import { pb, dayFilter, startOfDay, endOfDay } from "@/lib/pocketbase"
 import { toast } from "sonner"
 
 interface ProductBreakdown {
@@ -45,6 +54,13 @@ export default function TruckReloadsToGGBL() {
     const [selectedDate, setSelectedDate] = useState<Date>(new Date())
     const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
     const [calendarOpen, setCalendarOpen] = useState(false)
+
+    // CSV export modal (date range)
+    const [exportOpen, setExportOpen] = useState(false)
+    const [exportRange, setExportRange] = useState<Range[]>([
+        { startDate: new Date(), endDate: new Date(), key: "selection" },
+    ])
+    const [exporting, setExporting] = useState(false)
 
     const fetchData = async () => {
         setLoading(true)
@@ -191,6 +207,95 @@ export default function TruckReloadsToGGBL() {
         setExpandedRows(newExpanded)
     }
 
+    const csvEscape = (value: string | number | null | undefined): string => {
+        const s = value === null || value === undefined ? "" : String(value)
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+
+    const openExportDialog = () => {
+        setExportRange([{ startDate: new Date(), endDate: new Date(), key: "selection" }])
+        setExportOpen(true)
+    }
+
+    const handleExportCsv = async () => {
+        const start = exportRange[0]?.startDate
+        const end = exportRange[0]?.endDate
+        if (!start || !end) {
+            toast.error("Please select a start and end date.")
+            return
+        }
+
+        setExporting(true)
+        try {
+            const filter =
+                `activity = "empties_to_supplier" && date >= "${startOfDay(start)}" && date <= "${endOfDay(end)}"`
+            const logsData = await pb.collection("empties_log").getFullList({
+                filter,
+                sort: "-date",
+                fields: "id, date, total_quantity, vehicle_no, returned_by",
+            })
+
+            if (logsData.length === 0) {
+                toast.error("No records in the selected date range.")
+                return
+            }
+
+            const logIds = logsData.map((log) => log.id)
+            const detailData = await pb.collection("empties_log_detail").getFullList({
+                filter: logIds.map((id) => `log_id = "${id}"`).join(" || "),
+                expand: "product_id",
+            })
+
+            const detailsByLog: Record<string, ProductBreakdown[]> = {}
+            for (const detail of detailData) {
+                const rel = detail.expand?.product_id
+                const entry: ProductBreakdown = {
+                    quantity: detail.quantity,
+                    productName: rel?.sku_name || "Unknown",
+                }
+                if (!detailsByLog[detail.log_id]) {
+                    detailsByLog[detail.log_id] = []
+                }
+                detailsByLog[detail.log_id].push(entry)
+            }
+
+            const headers = ["Date", "Product", "Quantity", "Total Qty", "Vehicle #", "Driver Name"]
+            const csvRows: (string | number)[][] = []
+            for (const log of logsData) {
+                const base = [
+                    format(new Date(log.date), "yyyy-MM-dd"),
+                ]
+                const tail = [log.total_quantity, log.vehicle_no || "N/A", log.returned_by || "N/A"]
+                const products = detailsByLog[log.id] || []
+                if (products.length === 0) {
+                    csvRows.push([...base, "", ...tail])
+                } else {
+                    for (const p of products) {
+                        csvRows.push([...base, p.productName, p.quantity, ...tail])
+                    }
+                }
+            }
+
+            const csv = [headers, ...csvRows]
+                .map((row) => row.map(csvEscape).join(","))
+                .join("\n")
+            const blob = new Blob([csv], { type: "text/csv" })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement("a")
+            a.href = url
+            a.download = `truck-reloads-to-ggbl-${format(new Date(start), "yyyy-MM-dd")}-to-${format(new Date(end), "yyyy-MM-dd")}.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+            setExportOpen(false)
+            toast.success(`Exported ${csvRows.length} row(s).`)
+        } catch (error) {
+            console.error("Error exporting truck reloads:", error)
+            toast.error("Failed to export truck reloads")
+        } finally {
+            setExporting(false)
+        }
+    }
+
     const totalSent = reloadRecords.reduce(
         (sum, r) => sum + r.totalQuantity,
         0
@@ -212,34 +317,39 @@ export default function TruckReloadsToGGBL() {
             </div>
 
             {/* Date Filter */}
-            <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium">Select Date</label>
-                <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-                    <PopoverTrigger asChild>
-                        <Button
-                            variant="outline"
-                            className={cn(
-                                "w-full md:w-[240px] justify-start text-left font-normal"
-                            )}
-                        >
-                            <CalendarIcon className="mr-2 h-4 w-4" />
-                            {format(selectedDate, "PPP")}
-                        </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date) => {
-                                if (date) {
-                                    setSelectedDate(date)
-                                    setCalendarOpen(false)
-                                }
-                            }}
-                            initialFocus
-                        />
-                    </PopoverContent>
-                </Popover>
+            <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+                <div className="flex flex-col gap-2">
+                    <label className="text-sm font-medium">Select Date</label>
+                    <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                variant="outline"
+                                className={cn(
+                                    "w-full md:w-[240px] justify-start text-left font-normal"
+                                )}
+                            >
+                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                {format(selectedDate, "PPP")}
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                                mode="single"
+                                selected={selectedDate}
+                                onSelect={(date) => {
+                                    if (date) {
+                                        setSelectedDate(date)
+                                        setCalendarOpen(false)
+                                    }
+                                }}
+                                initialFocus
+                            />
+                        </PopoverContent>
+                    </Popover>
+                </div>
+                <Button variant="outline" onClick={openExportDialog} className="gap-2">
+                    <Download className="h-4 w-4" /> Export CSV
+                </Button>
             </div>
 
             {/* Stats Cards */}
@@ -417,6 +527,50 @@ export default function TruckReloadsToGGBL() {
                         )
                 )}
             </div>
+
+            {/* Export CSV (date range) */}
+            <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+                <DialogContent className="max-w-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Download className="h-5 w-5" />
+                            Export Truck Reloads to GGBL
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-2">
+                        <span className="text-sm font-medium">Date Range</span>
+                        <DateRangePicker
+                            value={exportRange}
+                            onChange={(ranges: RangeKeyDict) => {
+                                const selection = ranges.selection
+                                if (selection?.startDate && selection?.endDate) {
+                                    setExportRange([selection])
+                                }
+                            }}
+                        />
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-2">
+                        <Button variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleExportCsv}
+                            disabled={exporting}
+                            className="bg-amber-700 hover:bg-amber-800 gap-2"
+                        >
+                            {exporting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Exporting...
+                                </>
+                            ) : (
+                                <>
+                                    <Download className="h-4 w-4" /> Export CSV
+                                </>
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
