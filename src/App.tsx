@@ -17,7 +17,7 @@ import CompletedOrders from "@/pages/warehouse/CompletedOrders"
 import RecordReceivable from "@/pages/warehouse/RecordReceivable"
 import ReceivablesLog from "@/pages/warehouse/ReceivablesLog"
 import InventoryLog from "@/pages/warehouse/InventoryLog"
-import AddLoadout from "@/pages/warehouse/AddLoadout"
+import AddLoadout from "@/pages/pos/AddLoadout"
 import RecordVSEReturn from "@/pages/warehouse/RecordVSEReturn"
 import RecordVSESale from "@/pages/pos/RecordVSESale"
 import Loadout from "@/pages/warehouse/Loadout"
@@ -125,11 +125,6 @@ function App() {
                 } />
                 <Route path="receivables-log" element={<ReceivablesLog />} />
                 <Route path="inventory-log" element={<InventoryLog />} />
-                <Route path="add-loadout" element={
-                  <ProtectedRoute allowedRoles={['admin', 'warehouse_manager']}>
-                    <AddLoadout />
-                  </ProtectedRoute>
-                } />
                 <Route path="record-vse-returns" element={
                   <ProtectedRoute allowedRoles={['admin', 'warehouse_manager']}>
                     <RecordVSEReturn />
@@ -242,6 +237,11 @@ function App() {
                 <Route path="record-vse-sales" element={
                   <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
                     <RecordVSESale />
+                  </ProtectedRoute>
+                } />
+                <Route path="add-loadout" element={
+                  <ProtectedRoute allowedRoles={['admin', 'sales_manager']}>
+                    <AddLoadout />
                   </ProtectedRoute>
                 } />
                 <Route path="empties-deposit" element={

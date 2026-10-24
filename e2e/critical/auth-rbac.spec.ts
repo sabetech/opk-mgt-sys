@@ -58,7 +58,7 @@ test.describe("auth + RBAC", () => {
     await page.getByRole("button", { name: /log in|sign in/i }).click();
     await expect(page).toHaveURL(/\/dashboard/);
 
-    await page.goto("/dashboard/warehouse/add-loadout");
+    await page.goto("/dashboard/pos/add-loadout");
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByRole("heading", { name: "Add Loadout" })).toHaveCount(0);
   });

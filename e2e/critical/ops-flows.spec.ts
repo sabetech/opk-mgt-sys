@@ -15,7 +15,7 @@ test.describe("operations P0 flows", () => {
   });
 
   test("LOAD-01 add-loadout page renders VSE + date inputs", async ({ page }) => {
-    await page.goto("/dashboard/warehouse/add-loadout");
+    await page.goto("/dashboard/pos/add-loadout");
     await expect(page.getByRole("heading", { name: "Add Loadout" })).toBeVisible();
     // See pos-sale.spec.ts NOTE: role+name matching misses cmdk triggers here.
     await expect(page.locator('[role="combobox"]:has-text("Select VSE")')).toBeVisible();
