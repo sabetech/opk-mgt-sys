@@ -550,7 +550,7 @@ export default function SalesReport() {
             </div>
 
             {/* Ask about this report (instant summaries + AI for open questions) */}
-            <AskData summary={buildSalesSummary(filteredRows, formatDateRangeDisplay())} />
+            {/* <AskData summary={buildSalesSummary(filteredRows, formatDateRangeDisplay())} /> */}
 
             {/* Filters */}
             <div className="flex flex-col gap-4 md:flex-row md:items-end">
